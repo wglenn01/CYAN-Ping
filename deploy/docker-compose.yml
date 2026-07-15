@@ -21,6 +21,8 @@ services:
       DB_NAME: "cyanping"
       CORS_ORIGINS: "*"
       JWT_SECRET: "CHANGE_ME_TO_A_LONG_RANDOM_STRING"
+    ports:
+      - "8001:8001"    # backend API -> http://<server-ip>:8001/api
     # Allow unprivileged ICMP (fping-style) inside the container.
     sysctls:
       - net.ipv4.ping_group_range=0 2147483647
