@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Activity, Loader2, ShieldCheck } from "lucide-react";
+import { Activity, Loader2 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -92,11 +92,6 @@ export default function Login() {
               )}
             </Button>
           </form>
-
-          <div className="mt-4 flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
-            <ShieldCheck className="h-3.5 w-3.5 text-cyan-400" />
-            Demo credentials: <span className="mono text-foreground">admin / admin</span>
-          </div>
         </div>
       </div>
     </div>
