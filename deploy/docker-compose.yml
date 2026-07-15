@@ -1,0 +1,56 @@
+services:
+  mongo:
+    image: mongo:7
+    container_name: cyanping-mongo
+    restart: unless-stopped
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - cyanping
+
+  backend:
+    build:
+      context: ../backend
+      dockerfile: ../deploy/backend.Dockerfile
+    container_name: cyanping-backend
+    restart: unless-stopped
+    depends_on:
+      - mongo
+    environment:
+      MONGO_URL: "mongodb://mongo:27017"
+      DB_NAME: "cyanping"
+      CORS_ORIGINS: "*"
+      JWT_SECRET: "CHANGE_ME_TO_A_LONG_RANDOM_STRING"
+    # Allow unprivileged ICMP (fping-style) inside the container.
+    sysctls:
+      - net.ipv4.ping_group_range=0 2147483647
+    # If your kernel/host blocks the sysctl above, use raw sockets instead:
+    # cap_add:
+    #   - NET_RAW
+    networks:
+      - cyanping
+
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: ../deploy/frontend.Dockerfile
+      args:
+        # Point the browser at the backend. Change to your server's URL.
+        REACT_APP_BACKEND_URL: "http://localhost:8001"
+    container_name: cyanping-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"    # web UI  -> http://<server-ip>:8080
+    networks:
+      - cyanping
+
+  # Expose backend directly (frontend calls it via REACT_APP_BACKEND_URL)
+  # Simplest setup: publish backend on 8001 and set REACT_APP_BACKEND_URL to it.
+
+networks:
+  cyanping:
+
+volumes:
+  mongo_data:
