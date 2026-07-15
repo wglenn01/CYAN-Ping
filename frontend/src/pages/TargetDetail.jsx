@@ -8,14 +8,17 @@ import {
   Server,
   Timer,
   Radio,
+  Route,
   Activity,
 } from "lucide-react";
 import { api } from "../api";
 import { lossColor, TIME_RANGES } from "../constants";
 import { fmtMs, statusMeta, fmtInterval } from "../lib/utils-sp";
 import SmokeGraph, { LossLegend } from "../components/SmokeGraph";
+import MtrPanel from "../components/MtrPanel";
 import TargetFormModal from "../components/TargetFormModal";
 import { Button } from "../components/ui/button";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/tabs";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -158,45 +161,60 @@ export default function TargetDetail() {
         <StatPill label="Avg Loss" value={`${s.avgLoss}%`} color="#a855f7" />
       </div>
 
-      <div className="glass rounded-2xl p-4 lg:p-5">
-        <div className="mb-4 flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
-          <h2 className="text-sm font-semibold uppercase tracking-wider">
-            Latency &amp; Loss
-          </h2>
-          <div className="flex flex-wrap gap-1 rounded-lg border border-border/60 bg-background/40 p-1">
-            {TIME_RANGES.map((r) => (
-              <button
-                key={r.key}
-                onClick={() => setRange(r.key)}
-                className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                  range === r.key
-                    ? "bg-cyan-400/15 text-cyan-300"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                {r.key}
-              </button>
-            ))}
-          </div>
-        </div>
+      <Tabs defaultValue="latency" className="glass rounded-2xl p-4 lg:p-5">
+        <TabsList className="mb-4 bg-background/40">
+          <TabsTrigger value="latency">
+            <Activity className="mr-1.5 h-3.5 w-3.5" /> Latency
+          </TabsTrigger>
+          <TabsTrigger value="mtr">
+            <Route className="mr-1.5 h-3.5 w-3.5" /> Route (MTR)
+          </TabsTrigger>
+        </TabsList>
 
-        {loading ? (
-          <div className="flex h-[340px] items-center justify-center text-sm text-muted-foreground">
-            Loading measurements…
+        <TabsContent value="latency" className="mt-0">
+          <div className="mb-4 flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+            <h2 className="text-sm font-semibold uppercase tracking-wider">
+              Latency &amp; Loss
+            </h2>
+            <div className="flex flex-wrap gap-1 rounded-lg border border-border/60 bg-background/40 p-1">
+              {TIME_RANGES.map((r) => (
+                <button
+                  key={r.key}
+                  onClick={() => setRange(r.key)}
+                  className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                    range === r.key
+                      ? "bg-cyan-400/15 text-cyan-300"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {r.key}
+                </button>
+              ))}
+            </div>
           </div>
-        ) : series.length === 0 ? (
-          <div className="flex h-[340px] flex-col items-center justify-center text-center text-sm text-muted-foreground">
-            <Activity className="mb-2 h-6 w-6" />
-            No data yet — measurements are being collected. Check back shortly.
-          </div>
-        ) : (
-          <SmokeGraph data={series} rangeKey={range} height={340} />
-        )}
 
-        <div className="mt-4 border-t border-border/60 pt-3">
-          <LossLegend />
-        </div>
-      </div>
+          {loading ? (
+            <div className="flex h-[340px] items-center justify-center text-sm text-muted-foreground">
+              Loading measurements…
+            </div>
+          ) : series.length === 0 ? (
+            <div className="flex h-[340px] flex-col items-center justify-center text-center text-sm text-muted-foreground">
+              <Activity className="mb-2 h-6 w-6" />
+              No data yet — measurements are being collected. Check back shortly.
+            </div>
+          ) : (
+            <SmokeGraph data={series} rangeKey={range} height={340} />
+          )}
+
+          <div className="mt-4 border-t border-border/60 pt-3">
+            <LossLegend />
+          </div>
+        </TabsContent>
+
+        <TabsContent value="mtr" className="mt-0">
+          <MtrPanel targetId={id} />
+        </TabsContent>
+      </Tabs>
 
       {target && (
         <TargetFormModal

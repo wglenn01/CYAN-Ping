@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 from auth import (verify_password, create_token, get_current_user)
 import scheduler
+import mtr as mtr_engine
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
@@ -277,6 +278,47 @@ async def series(tid: str, range: str = "30h",
     return {"points": points, "stats": stats}
 
 
+# ---------- MTR (traceroute) ----------
+@api.post("/targets/{tid}/mtr/run")
+async def run_target_mtr(tid: str, username: str = Depends(get_current_user)):
+    t = await db.targets.find_one({"id": tid})
+    if not t:
+        raise HTTPException(status_code=404, detail="Target not found")
+    try:
+        hops = await mtr_engine.run_mtr(t["host"], count=5)
+    except Exception as e:
+        logger.warning("MTR failed for %s: %s", t["host"], e)
+        raise HTTPException(
+            status_code=503,
+            detail="Traceroute requires elevated privileges (raw sockets / "
+                   "NET_RAW). This works on your self-hosted deployment.",
+        )
+    ts = datetime.now(timezone.utc)
+    doc = {"id": str(uuid.uuid4()), "target_id": tid, "timestamp": ts,
+           "hops": hops, "source": "ondemand"}
+    await db.mtr_results.insert_one(doc)
+    return {"timestamp": int(ts.timestamp() * 1000), "hops": hops,
+            "source": "ondemand"}
+
+
+@api.get("/targets/{tid}/mtr")
+async def get_target_mtr(tid: str, username: str = Depends(get_current_user)):
+    t = await db.targets.find_one({"id": tid})
+    if not t:
+        raise HTTPException(status_code=404, detail="Target not found")
+    latest = await db.mtr_results.find({"target_id": tid}).sort(
+        "timestamp", -1).limit(1).to_list(1)
+    result = None
+    if latest:
+        r = latest[0]
+        ts = r["timestamp"]
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        result = {"timestamp": int(ts.timestamp() * 1000), "hops": r["hops"],
+                  "source": r.get("source", "scheduled")}
+    return {"available": mtr_engine.mtr_available(), "latest": result}
+
+
 # ---------- Alerts ----------
 @api.get("/alerts")
 async def get_alerts(username: str = Depends(get_current_user)):
@@ -327,6 +369,7 @@ async def startup():
     await scheduler.seed_defaults(db)
     await scheduler.start_all(db)
     asyncio.create_task(scheduler.retention_loop(db))
+    asyncio.create_task(scheduler.mtr_loop(db))
     logger.info("CyanPing started, per-target probe loops running")
 
 

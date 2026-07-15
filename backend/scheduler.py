@@ -277,7 +277,36 @@ async def retention_loop(db):
         try:
             cutoff = now_ts() - timedelta(days=RETENTION_DAYS)
             await db.measurements.delete_many({"timestamp": {"$lt": cutoff}})
-            # resolve stale active alerts whose targets vanished
+            await db.mtr_results.delete_many({"timestamp": {"$lt": cutoff}})
         except Exception as e:
             print("retention error:", e)
         await asyncio.sleep(3600)
+
+
+MTR_INTERVAL = 300  # background traceroute every 5 minutes
+
+
+async def mtr_loop(db):
+    import uuid as _uuid
+    import mtr as mtr_engine
+    if not mtr_engine.mtr_available():
+        print("MTR unavailable (no raw socket / mtr binary) - background traces "
+              "disabled. On-demand runs will return 503 until deployed with "
+              "NET_RAW privileges.")
+        return
+    await asyncio.sleep(20)
+    while True:
+        try:
+            targets = await db.targets.find({"enabled": True}).to_list(1000)
+            for t in targets:
+                try:
+                    hops = await mtr_engine.run_mtr(t["host"], count=3)
+                    await db.mtr_results.insert_one({
+                        "id": str(_uuid.uuid4()), "target_id": t["id"],
+                        "timestamp": now_ts(), "hops": hops,
+                        "source": "scheduled"})
+                except Exception:
+                    pass
+        except Exception as e:
+            print("mtr_loop error:", e)
+        await asyncio.sleep(MTR_INTERVAL)

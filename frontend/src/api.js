@@ -41,6 +41,8 @@ export const api = {
   deleteTarget: (id) => client.delete(`/targets/${id}`).then((r) => r.data),
   series: (id, range) =>
     client.get(`/targets/${id}/series`, { params: { range } }).then((r) => r.data),
+  getMtr: (id) => client.get(`/targets/${id}/mtr`).then((r) => r.data),
+  runMtr: (id) => client.post(`/targets/${id}/mtr/run`).then((r) => r.data),
   alerts: () => client.get("/alerts").then((r) => r.data),
   alertRules: () => client.get("/alert-rules").then((r) => r.data),
   updateRule: (id, enabled) =>

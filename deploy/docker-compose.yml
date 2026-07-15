@@ -26,9 +26,10 @@ services:
     # Allow unprivileged ICMP (fping-style) inside the container.
     sysctls:
       - net.ipv4.ping_group_range=0 2147483647
-    # If your kernel/host blocks the sysctl above, use raw sockets instead:
-    # cap_add:
-    #   - NET_RAW
+    # NET_RAW is required for the MTR / traceroute feature (and enables
+    # privileged ICMP). Safe for a self-hosted monitoring container.
+    cap_add:
+      - NET_RAW
     networks:
       - cyanping
 
