@@ -58,8 +58,8 @@ export default function Settings() {
   const { user } = useAuth();
   const [emailAlerts, setEmailAlerts] = useState(true);
   const [webhookAlerts, setWebhookAlerts] = useState(false);
-  const [interval, setInterval] = useState("60");
-  const [retention, setRetention] = useState("360");
+  const [interval, setInterval] = useState("1");
+  const [retention, setRetention] = useState("7");
 
   return (
     <div className="mx-auto max-w-[900px] p-4 lg:p-6">
@@ -117,10 +117,12 @@ export default function Settings() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="30">Every 30 seconds</SelectItem>
+                <SelectItem value="0.25">Every 0.25s</SelectItem>
+                <SelectItem value="0.5">Every 0.5s</SelectItem>
+                <SelectItem value="1">Every 1 second</SelectItem>
+                <SelectItem value="2">Every 2 seconds</SelectItem>
+                <SelectItem value="5">Every 5 seconds</SelectItem>
                 <SelectItem value="60">Every 60 seconds</SelectItem>
-                <SelectItem value="120">Every 2 minutes</SelectItem>
-                <SelectItem value="300">Every 5 minutes</SelectItem>
               </SelectContent>
             </Select>
           </Row>
@@ -130,19 +132,16 @@ export default function Settings() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="30">30 days</SelectItem>
-                <SelectItem value="90">90 days</SelectItem>
-                <SelectItem value="360">360 days</SelectItem>
-                <SelectItem value="720">2 years</SelectItem>
+                <SelectItem value="1">1 day</SelectItem>
+                <SelectItem value="3">3 days</SelectItem>
+                <SelectItem value="7">7 days</SelectItem>
               </SelectContent>
             </Select>
           </Row>
-          <Row label="Pings per sample" hint="Packets sent per measurement (ICMP)">
-            <Input
-              type="number"
-              defaultValue={20}
-              className="mono w-40 bg-background/50"
-            />
+          <Row label="Packets per sample" hint="Single-packet probing for high-resolution loss & jitter">
+            <span className="mono rounded-md border border-border/60 bg-background/50 px-3 py-1.5 text-sm text-muted-foreground">
+              1 packet
+            </span>
           </Row>
         </Section>
 

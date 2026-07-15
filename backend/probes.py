@@ -1,8 +1,10 @@
-"""Network probe implementations for CyanPing. All return a dict:
-{min, avg, median, max, loss, up}  (latency in ms)
+"""Network probe implementations for CyanPing.
+
+Primary mode: SINGLE-PACKET probes (run_probe_single) -> {"rtt": float|None, "up": bool}
+Loss %, jitter and min/med/max are derived by aggregating many single samples
+into time buckets (classic SmokePing model). RTT is in milliseconds.
 """
 import asyncio
-import statistics
 import time
 import socket
 from urllib.parse import urlparse
@@ -14,57 +16,41 @@ except Exception:  # pragma: no cover
 
 import httpx
 
-
-def _summarize(samples, attempts):
-    """samples: list of successful latencies (ms). attempts: total tries."""
-    lost = attempts - len(samples)
-    loss = round((lost / attempts) * 100, 1) if attempts else 100.0
-    if not samples:
-        return {"min": None, "avg": None, "median": None, "max": None,
-                "loss": 100.0, "up": False}
-    return {
-        "min": round(min(samples), 2),
-        "avg": round(sum(samples) / len(samples), 2),
-        "median": round(statistics.median(samples), 2),
-        "max": round(max(samples), 2),
-        "loss": loss,
-        "up": loss < 100,
-    }
+DEFAULT_TIMEOUT = 2.0  # seconds
 
 
-async def probe_icmp(host, count=15):
+async def _icmp_single(host, timeout=DEFAULT_TIMEOUT):
     if async_ping is None:
-        return _summarize([], count)
+        return {"rtt": None, "up": False}
     try:
-        h = await async_ping(host, count=count, interval=0.05, timeout=1,
-                             privileged=False)
-        rtts = list(h.rtts)
-        return _summarize(rtts, count)
+        h = await async_ping(host, count=1, timeout=timeout, privileged=False)
+        if h.rtts:
+            return {"rtt": round(h.rtts[0], 3), "up": True}
+        return {"rtt": None, "up": False}
     except Exception:
-        # fallback to privileged (works on servers with CAP_NET_RAW)
         try:
-            h = await async_ping(host, count=count, interval=0.05, timeout=1,
-                                 privileged=True)
-            return _summarize(list(h.rtts), count)
+            h = await async_ping(host, count=1, timeout=timeout, privileged=True)
+            if h.rtts:
+                return {"rtt": round(h.rtts[0], 3), "up": True}
         except Exception:
-            return _summarize([], count)
+            pass
+        return {"rtt": None, "up": False}
 
 
-async def probe_http(url, attempts=3):
+async def _http_single(url, timeout=DEFAULT_TIMEOUT):
     if not url.startswith("http"):
         url = "https://" + url
-    samples = []
-    async with httpx.AsyncClient(timeout=5, verify=False, follow_redirects=True) as client:
-        for _ in range(attempts):
-            t0 = time.perf_counter()
-            try:
-                r = await client.get(url)
-                if r.status_code < 500:
-                    samples.append((time.perf_counter() - t0) * 1000)
-            except Exception:
-                pass
-            await asyncio.sleep(0.05)
-    return _summarize(samples, attempts)
+    t0 = time.perf_counter()
+    try:
+        async with httpx.AsyncClient(timeout=timeout, verify=False,
+                                     follow_redirects=True) as client:
+            r = await client.get(url)
+            ms = (time.perf_counter() - t0) * 1000
+            if r.status_code < 500:
+                return {"rtt": round(ms, 3), "up": True}
+    except Exception:
+        pass
+    return {"rtt": None, "up": False}
 
 
 def _dns_once(hostname):
@@ -73,36 +59,18 @@ def _dns_once(hostname):
     return (time.perf_counter() - t0) * 1000
 
 
-async def probe_dns(hostname, attempts=3):
-    # strip scheme if a URL was given
+async def _dns_single(hostname, timeout=DEFAULT_TIMEOUT):
     if "://" in hostname:
         hostname = urlparse(hostname).hostname or hostname
-    samples = []
-    for _ in range(attempts):
-        try:
-            ms = await asyncio.to_thread(_dns_once, hostname)
-            samples.append(ms)
-        except Exception:
-            pass
-        await asyncio.sleep(0.05)
-    return _summarize(samples, attempts)
-
-
-async def _tcp_once(host, port):
-    t0 = time.perf_counter()
-    fut = asyncio.open_connection(host, port)
-    reader, writer = await asyncio.wait_for(fut, timeout=5)
-    ms = (time.perf_counter() - t0) * 1000
-    writer.close()
     try:
-        await writer.wait_closed()
+        ms = await asyncio.wait_for(asyncio.to_thread(_dns_once, hostname),
+                                    timeout=timeout)
+        return {"rtt": round(ms, 3), "up": True}
     except Exception:
-        pass
-    return ms
+        return {"rtt": None, "up": False}
 
 
-async def probe_tcp(target, attempts=3):
-    # target formats: host:port  |  https://host  (defaults 443/80)
+async def _tcp_single(target, timeout=DEFAULT_TIMEOUT):
     host, port = target, 80
     if "://" in target:
         u = urlparse(target)
@@ -114,29 +82,32 @@ async def probe_tcp(target, attempts=3):
             port = int(p)
         except ValueError:
             port = 80
-    samples = []
-    for _ in range(attempts):
+    t0 = time.perf_counter()
+    try:
+        fut = asyncio.open_connection(host, int(port))
+        reader, writer = await asyncio.wait_for(fut, timeout=timeout)
+        ms = (time.perf_counter() - t0) * 1000
+        writer.close()
         try:
-            ms = await _tcp_once(host, int(port))
-            samples.append(ms)
+            await writer.wait_closed()
         except Exception:
             pass
-        await asyncio.sleep(0.05)
-    return _summarize(samples, attempts)
+        return {"rtt": round(ms, 3), "up": True}
+    except Exception:
+        return {"rtt": None, "up": False}
 
 
-PROBE_FUNCS = {
-    "ICMP": probe_icmp,
-    "HTTP": probe_http,
-    "DNS": probe_dns,
-    "TCP": probe_tcp,
+_SINGLE = {
+    "ICMP": _icmp_single,
+    "HTTP": _http_single,
+    "DNS": _dns_single,
+    "TCP": _tcp_single,
 }
 
 
-async def run_probe(probe_type, host):
-    func = PROBE_FUNCS.get(probe_type, probe_icmp)
+async def run_probe_single(probe_type, host, timeout=DEFAULT_TIMEOUT):
+    func = _SINGLE.get(probe_type, _icmp_single)
     try:
-        return await func(host)
+        return await func(host, timeout=timeout)
     except Exception:
-        return {"min": None, "avg": None, "median": None, "max": None,
-                "loss": 100.0, "up": False}
+        return {"rtt": None, "up": False}

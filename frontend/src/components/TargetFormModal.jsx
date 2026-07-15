@@ -164,13 +164,33 @@ export default function TargetFormModal({ open, onOpenChange, target, onSaved })
             <Label>Poll interval (seconds)</Label>
             <Input
               type="number"
-              min={10}
+              min={0.25}
+              step={0.25}
               value={form.interval}
               onChange={(e) =>
                 setForm({ ...form, interval: Number(e.target.value) })
               }
               className="mono bg-background/50"
             />
+            <div className="flex flex-wrap gap-1.5">
+              {[0.25, 0.5, 1, 2, 5, 60].map((v) => (
+                <button
+                  key={v}
+                  type="button"
+                  onClick={() => setForm({ ...form, interval: v })}
+                  className={`mono rounded-md border px-2 py-0.5 text-[11px] transition-colors ${
+                    form.interval === v
+                      ? "border-cyan-400/40 bg-cyan-400/10 text-cyan-300"
+                      : "border-border/60 text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {v}s
+                </button>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              High resolution: down to 0.25s (one packet per probe).
+            </p>
           </div>
         </div>
 

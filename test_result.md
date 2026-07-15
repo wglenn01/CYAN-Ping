@@ -119,6 +119,9 @@ backend:
         -working: true
         -agent: "testing"
         -comment: "✅ ALL AUTH TESTS PASSED: (1) POST /api/auth/login with admin/admin returns access_token and user data correctly. (2) POST /api/auth/login with wrong password correctly returns 401. (3) GET /api/auth/me with Bearer token returns {username: admin, role: Administrator}. (4) GET /api/auth/me without token correctly returns 401. Minor: JWT key length warning (29 bytes vs 32 recommended) - doesn't affect functionality."
+        -working: true
+        -agent: "testing"
+        -comment: "✅ RE-TEST PASSED: Auth endpoints working correctly after high-resolution rewrite. Login with admin/admin returns token, wrong password returns 401."
   - task: "Groups & Targets CRUD + tree + overview"
     implemented: true
     working: true
@@ -133,6 +136,9 @@ backend:
         -working: true
         -agent: "testing"
         -comment: "✅ ALL CRUD TESTS PASSED: (1) GET /api/overview returns correct stats (up=8, warn=0, down=2, total=10, avg_latency=7.38ms). (2) GET /api/tree returns 4 groups with nested targets including all required fields. (3) GET /api/groups returns 4 groups. (4) GET /api/targets returns 10 targets with live stats. (5) GET /api/targets/{id} with valid ID returns target with groupName. (6) GET /api/targets/{id} with invalid ID returns 404. (7) POST /api/targets creates new target successfully. (8) PUT /api/targets/{id} updates target name correctly. (9) DELETE /api/targets/{id} deletes target and subsequent GET returns 404."
+        -working: true
+        -agent: "testing"
+        -comment: "✅ RE-TEST PASSED: (1) GET /api/overview returns total=10, avg_latency=8.76ms. (2) GET /api/tree returns 4 groups with all targets having numeric 'jitter' field. (3) GET /api/targets/{id} includes jitter=0.0 and groupName. All CRUD operations working correctly with new jitter field."
   - task: "Series (smoke graph) endpoint with bucketing"
     implemented: true
     working: true
@@ -147,6 +153,9 @@ backend:
         -working: true
         -agent: "testing"
         -comment: "✅ ALL SERIES TESTS PASSED: Tested all 4 ranges (3h, 30h, 10d, 360d). Each returns valid structure with points array and stats object. Points contain time/median/min/max/band/loss. Stats contain current/currentLoss/avg/min/max/avgLoss. Synthetic backfill data is present (3h: 15 points, 30h: 91 points, 10d: 241 points, 360d: 11 points). All ranges working correctly."
+        -working: true
+        -agent: "testing"
+        -comment: "✅ RE-TEST PASSED WITH JITTER: All 4 ranges (3h, 30h, 10d, 360d) return NON-EMPTY points with ALL required keys including 'jitter'. Points have: time, median, min, max, band, jitter, loss. Stats have: current, currentLoss, avg, min, max, avgLoss, jitter. Tested on 8.8.8.8 target. Results: 3h=63 points (jitter=0.45), 30h=181 points (jitter=2.05), 10d=169 points (jitter=4.17), 360d=8 points (jitter=5.8). Single-packet measurement schema with derived bucketing working perfectly."
   - task: "Real probes + background scheduler"
     implemented: true
     working: true
@@ -161,6 +170,9 @@ backend:
         -working: true
         -agent: "testing"
         -comment: "✅ REAL PROBES VERIFIED: Created test target to 1.1.1.1 with ICMP probe and 15s interval. After 30 seconds, target had live measurements (current=1.63ms). Scheduler is running correctly and populating measurements. Backend logs show real HTTP probes to GitHub and Google are executing successfully. All probe types (ICMP, HTTP, DNS, TCP) implemented correctly."
+        -working: true
+        -agent: "testing"
+        -comment: "✅ RE-TEST PASSED WITH FRACTIONAL INTERVALS: Created target with interval=0.5s (fractional). After 12 seconds, target had live measurements (current=1.795ms). Updated interval to 0.25s - correctly reflected. Tested min clamp: interval=0.1 correctly clamped to 0.25s. Per-target async loops with fractional intervals (min 0.25s) working perfectly. Backend logs show continuous real probing to Google/GitHub."
   - task: "Alerts + alert rules"
     implemented: true
     working: true
@@ -175,6 +187,9 @@ backend:
         -working: true
         -agent: "testing"
         -comment: "✅ ALL ALERT TESTS PASSED: (1) GET /api/alerts returns list of alerts (found 4 active alerts). (2) GET /api/alert-rules returns 3 seeded rules with all required fields (id, name, condition, operator, value, severity, enabled). (3) PUT /api/alert-rules/{id} successfully toggles enabled status and change is persisted. Alert system is fully functional."
+        -working: true
+        -agent: "testing"
+        -comment: "✅ RE-TEST PASSED WITH JITTER RULE: GET /api/alert-rules returns 4 rules (was 3 before) including new 'High Jitter' rule with condition='jitter'. Successfully toggled 'High Jitter' rule enabled status from False to True. GET /api/alerts returns 4 alerts with correct structure (id, target, targetId, rule, severity, status, message, since). New jitter alert condition fully functional."
 
 frontend:
   - task: "Full CyanPing UI (login, dashboard, target detail, alerts, settings)"
@@ -203,6 +218,8 @@ test_plan:
 
 agent_communication:
     -agent: "main"
-    -message: "Backend complete for CyanPing. Please test all API endpoints. Auth: POST /api/auth/login with {username: 'admin', password: 'admin'} to get access_token; send as Bearer for all other endpoints. Verify: overview, tree, targets CRUD (create a target with probe=ICMP host=1.1.1.1, then update, then it should get measurements, then delete), series endpoint for a seeded target across ranges (3h/30h/10d/360d) returns points+stats, alerts + alert-rules toggle. Note the scheduler runs real probes every 15s; seeded targets have synthetic backfilled history so series should be non-empty immediately."
+    -message: "RE-TEST after high-resolution engine rewrite. Changes: (1) Probe engine now SINGLE-PACKET per probe; measurement schema is {target_id,timestamp,rtt,up} instead of min/avg/median/max. (2) Per-target async loops with FRACTIONAL intervals (min 0.25s). (3) Series endpoint now buckets single-rtt samples and returns points with median/min/max/band/JITTER/loss + stats including jitter. (4) target_live includes 'jitter'. (5) New alert rule condition 'jitter'. (6) 7-day retention. Please re-verify: login (admin/admin); overview; tree (targets have jitter field); series for a seeded target across ranges 3h/30h/10d/360d returns non-empty points each with keys time,median,min,max,band,jitter,loss and stats with jitter; CREATE target with fractional interval 0.5 (e.g. {name:'HiRes',host:'1.1.1.1',probe:'ICMP',interval:0.5,group_id:<valid>}) -> returned target.interval should be 0.5; wait ~10s then GET target -> current latency populated (real probing at 0.5s); UPDATE interval to 0.25 -> reflected; DELETE works; alert-rules list has 4 rules incl 'High Jitter'; toggle a rule. Base URL from frontend/.env."
     -agent: "testing"
     -message: "✅ BACKEND TESTING COMPLETE - ALL 18 TESTS PASSED. Comprehensive testing performed covering: (1) JWT Auth - login with valid/invalid credentials, /me endpoint with/without token. (2) Overview endpoint - returns correct stats for 10 seeded targets. (3) Tree endpoint - returns 4 groups with nested targets. (4) Groups endpoint - returns all groups. (5) Targets CRUD - list, get by id (valid/invalid), create, update, delete all working. (6) Series endpoint - all 4 ranges (3h/30h/10d/360d) return valid bucketed data with synthetic backfill. (7) Alerts - list alerts and alert rules working. (8) Alert rules toggle - successfully updates enabled status. (9) Real probes - verified scheduler is running and populating live measurements after 30s. Backend logs show no errors, only minor warnings (bcrypt version, JWT key length) that don't affect functionality. All API endpoints are fully functional and ready for production use."
+    -agent: "testing"
+    -message: "✅ HIGH-RESOLUTION REWRITE RE-TEST COMPLETE - ALL 14 TESTS PASSED. Validated all key changes: (1) Auth: admin/admin login works, wrong password returns 401. (2) Overview: total=10, avg_latency=8.76ms. (3) Tree: All targets have numeric 'jitter' field. (4) Target by ID: includes jitter + groupName. (5) Series endpoint: ALL 4 ranges (3h/30h/10d/360d) return NON-EMPTY points with keys time,median,min,max,band,jitter,loss AND stats with jitter. Tested on 8.8.8.8 target. (6) Fractional intervals: Created target with interval=0.5s, returned interval=0.5 (float). (7) Live probing: After 12s, current=1.795ms (probing at 0.5s working). (8) Update interval: 0.5 -> 0.25 correctly reflected. (9) Min clamp: interval=0.1 correctly clamped to 0.25. (10) Delete: target deleted, GET returns 404. (11) Alert rules: 4 rules including 'High Jitter' with condition='jitter'. (12) Toggle rule: Successfully toggled 'High Jitter' rule. (13) Alerts: List returns correct structure. Single-packet measurement schema with derived bucketing, fractional intervals (min 0.25s), jitter calculation, and new jitter alert condition ALL WORKING PERFECTLY. Backend logs show continuous real probing with no errors."

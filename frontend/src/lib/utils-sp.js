@@ -16,9 +16,17 @@ export function timeAgo(ts) {
 
 export function fmtMs(v) {
   if (v == null) return "—";
+  if (v === 0) return "0ms";
   if (v < 1) return `${(v * 1000).toFixed(0)}µs`;
   if (v >= 1000) return `${(v / 1000).toFixed(2)}s`;
   return `${v.toFixed(1)}ms`;
+}
+
+export function fmtInterval(s) {
+  if (s == null) return "—";
+  if (s < 1) return `${s}s`;
+  if (s % 1 === 0) return `${s}s`;
+  return `${s}s`;
 }
 
 export const statusMeta = {

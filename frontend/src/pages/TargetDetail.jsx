@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { api } from "../api";
 import { lossColor, TIME_RANGES } from "../constants";
-import { fmtMs, statusMeta } from "../lib/utils-sp";
+import { fmtMs, statusMeta, fmtInterval } from "../lib/utils-sp";
 import SmokeGraph, { LossLegend } from "../components/SmokeGraph";
 import TargetFormModal from "../components/TargetFormModal";
 import { Button } from "../components/ui/button";
@@ -77,7 +77,7 @@ export default function TargetDetail() {
     const iv = setInterval(() => {
       loadTarget();
       loadSeries();
-    }, 30000);
+    }, 10000);
     return () => clearInterval(iv);
   }, [loadTarget, loadSeries]);
 
@@ -129,7 +129,7 @@ export default function TargetDetail() {
                 <Radio className="h-3.5 w-3.5 text-purple-400" /> {target.probe}
               </span>
               <span className="flex items-center gap-1.5">
-                <Timer className="h-3.5 w-3.5" /> every {target.interval}s
+                <Timer className="h-3.5 w-3.5" /> every {fmtInterval(target.interval)}
               </span>
             </div>
           )}
@@ -148,12 +148,13 @@ export default function TargetDetail() {
         </div>
       </div>
 
-      <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+      <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
         <StatPill label="Current" value={fmtMs(s.current)} color="#22d3ee" />
         <StatPill label="Loss" value={`${s.currentLoss}%`} color={lossColor(s.currentLoss)} />
         <StatPill label="Avg" value={fmtMs(s.avg)} />
         <StatPill label="Min" value={fmtMs(s.min)} color="#4ade80" />
         <StatPill label="Max" value={fmtMs(s.max)} color="#fb923c" />
+        <StatPill label="Jitter" value={fmtMs(s.jitter)} color="#38bdf8" />
         <StatPill label="Avg Loss" value={`${s.avgLoss}%`} color="#a855f7" />
       </div>
 

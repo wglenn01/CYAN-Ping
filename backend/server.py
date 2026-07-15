@@ -26,6 +26,8 @@ app = FastAPI(title="CyanPing API")
 api = APIRouter(prefix="/api")
 
 logging.basicConfig(level=logging.INFO)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 logger = logging.getLogger("cyanping")
 
 RANGES = {
@@ -46,7 +48,7 @@ class TargetIn(BaseModel):
     name: str
     host: str
     probe: str = "ICMP"
-    interval: int = 60
+    interval: float = 60
     group_id: str
 
 
@@ -54,9 +56,12 @@ class TargetUpdate(BaseModel):
     name: Optional[str] = None
     host: Optional[str] = None
     probe: Optional[str] = None
-    interval: Optional[int] = None
+    interval: Optional[float] = None
     group_id: Optional[str] = None
     enabled: Optional[bool] = None
+
+
+MIN_INTERVAL = 0.25
 
 
 class GroupIn(BaseModel):
@@ -81,6 +86,7 @@ async def target_live(t):
         "status": t.get("status", "up"),
         "current": t.get("last_latency"),
         "currentLoss": t.get("last_loss", 0),
+        "jitter": t.get("last_jitter", 0),
         "last_check": t.get("last_check"),
     }
 
@@ -167,10 +173,12 @@ async def create_target(body: TargetIn, username: str = Depends(get_current_user
     if not grp:
         raise HTTPException(status_code=400, detail="Invalid group")
     t = {"id": str(uuid.uuid4()), "group_id": body.group_id, "name": body.name,
-         "host": body.host, "probe": body.probe, "interval": max(10, body.interval),
+         "host": body.host, "probe": body.probe,
+         "interval": max(MIN_INTERVAL, float(body.interval)),
          "enabled": True, "base": 15.0, "jitter": 4.0, "status": "up",
          "last_check": None, "created_at": datetime.now(timezone.utc)}
     await db.targets.insert_one(t)
+    await scheduler.start_target(db, t)
     return await target_live(t)
 
 
@@ -182,15 +190,17 @@ async def update_target(tid: str, body: TargetUpdate,
         raise HTTPException(status_code=404, detail="Target not found")
     updates = {k: v for k, v in body.dict().items() if v is not None}
     if "interval" in updates:
-        updates["interval"] = max(10, updates["interval"])
+        updates["interval"] = max(MIN_INTERVAL, float(updates["interval"]))
     if updates:
         await db.targets.update_one({"id": tid}, {"$set": updates})
     t = await db.targets.find_one({"id": tid})
+    await scheduler.restart_target(db, t)
     return await target_live(t)
 
 
 @api.delete("/targets/{tid}")
 async def delete_target(tid: str, username: str = Depends(get_current_user)):
+    scheduler.stop_target(tid)
     res = await db.targets.delete_one({"id": tid})
     if res.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Target not found")
@@ -211,7 +221,7 @@ async def series(tid: str, range: str = "30h",
     start = now - timedelta(seconds=seconds)
     rows = await db.measurements.find(
         {"target_id": tid, "timestamp": {"$gte": start}}
-    ).sort("timestamp", 1).to_list(20000)
+    ).sort("timestamp", 1).to_list(200000)
 
     bucket_ms = (seconds * 1000) / npoints
     buckets = {}
@@ -220,34 +230,38 @@ async def series(tid: str, range: str = "30h",
         if ts.tzinfo is None:
             ts = ts.replace(tzinfo=timezone.utc)
         idx = int((ts.timestamp() * 1000) // bucket_ms)
-        b = buckets.setdefault(idx, {"medians": [], "mins": [], "maxs": [], "loss": []})
-        if r.get("median") is not None:
-            b["medians"].append(r["median"])
-            b["mins"].append(r["min"])
-            b["maxs"].append(r["max"])
-        b["loss"].append(r.get("loss", 0))
+        b = buckets.setdefault(idx, {"rtts": [], "total": 0, "lost": 0})
+        b["total"] += 1
+        if r.get("up") and r.get("rtt") is not None:
+            b["rtts"].append(r["rtt"])
+        else:
+            b["lost"] += 1
 
+    import statistics as _st
     points = []
     for idx in sorted(buckets.keys()):
         b = buckets[idx]
         t_center = (idx * bucket_ms) + bucket_ms / 2
-        if b["medians"]:
-            med = sum(b["medians"]) / len(b["medians"])
-            mn = min(b["mins"])
-            mx = max(b["maxs"])
+        rtts = b["rtts"]
+        if rtts:
+            med = _st.median(rtts)
+            mn = min(rtts)
+            mx = max(rtts)
+            jit = _st.pstdev(rtts) if len(rtts) > 1 else 0.0
         else:
-            med, mn, mx = 0, 0, 0
-        loss = sum(b["loss"]) / len(b["loss"]) if b["loss"] else 0
+            med = mn = mx = jit = 0
+        loss = (b["lost"] / b["total"]) * 100 if b["total"] else 0
         points.append({
             "time": int(t_center),
-            "median": round(med, 2), "min": round(mn, 2), "max": round(mx, 2),
-            "band": round(mx - mn, 2), "loss": round(loss, 1),
+            "median": round(med, 3), "min": round(mn, 3), "max": round(mx, 3),
+            "band": round(mx - mn, 3), "jitter": round(jit, 3),
+            "loss": round(loss, 1),
         })
 
-    # stats
     if points:
         meds = [p["median"] for p in points if p["median"] > 0]
         losses = [p["loss"] for p in points]
+        jits = [p["jitter"] for p in points if p["median"] > 0]
         stats = {
             "current": points[-1]["median"],
             "currentLoss": points[-1]["loss"],
@@ -255,9 +269,11 @@ async def series(tid: str, range: str = "30h",
             "min": round(min(meds), 2) if meds else 0,
             "max": round(max(meds), 2) if meds else 0,
             "avgLoss": round(sum(losses) / len(losses), 1) if losses else 0,
+            "jitter": round(sum(jits) / len(jits), 2) if jits else 0,
         }
     else:
-        stats = {"current": 0, "currentLoss": 0, "avg": 0, "min": 0, "max": 0, "avgLoss": 0}
+        stats = {"current": 0, "currentLoss": 0, "avg": 0, "min": 0,
+                 "max": 0, "avgLoss": 0, "jitter": 0}
     return {"points": points, "stats": stats}
 
 
@@ -309,8 +325,9 @@ app.add_middleware(
 @app.on_event("startup")
 async def startup():
     await scheduler.seed_defaults(db)
-    asyncio.create_task(scheduler.poll_loop(db))
-    logger.info("CyanPing started, scheduler running")
+    await scheduler.start_all(db)
+    asyncio.create_task(scheduler.retention_loop(db))
+    logger.info("CyanPing started, per-target probe loops running")
 
 
 @app.on_event("shutdown")

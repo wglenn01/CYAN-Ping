@@ -37,6 +37,10 @@ function SmokeTooltip({ active, payload, rangeKey }) {
           </span>
         </div>
         <div className="flex justify-between gap-4">
+          <span className="text-muted-foreground">Jitter</span>
+          <span className="text-sky-300">{fmtMs(d.jitter)}</span>
+        </div>
+        <div className="flex justify-between gap-4">
           <span className="text-muted-foreground">Loss</span>
           <span style={{ color: lossColor(d.loss) }}>{d.loss}%</span>
         </div>
