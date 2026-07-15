@@ -38,19 +38,19 @@ services:
       context: ../frontend
       dockerfile: ../deploy/frontend.Dockerfile
       args:
-        # Point the browser at the backend. Change to your server's URL.
-        REACT_APP_BACKEND_URL: "http://localhost:8001"
+        # Empty = the frontend calls the API on its OWN origin (/api), which
+        # nginx reverse-proxies to the backend container. This works on any
+        # server IP with no CORS setup. (Only set a URL here if you serve the
+        # backend on a separate hostname.)
+        REACT_APP_BACKEND_URL: ""
     container_name: cyanping-frontend
     restart: unless-stopped
     depends_on:
       - backend
     ports:
-      - "8080:80"    # web UI  -> http://<server-ip>:8080
+      - "8080:80"    # web UI + API proxy -> http://<server-ip>:8080
     networks:
       - cyanping
-
-  # Expose backend directly (frontend calls it via REACT_APP_BACKEND_URL)
-  # Simplest setup: publish backend on 8001 and set REACT_APP_BACKEND_URL to it.
 
 networks:
   cyanping:
