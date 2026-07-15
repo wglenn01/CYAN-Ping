@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from "react";
-import { mockUser } from "../mock";
+import { api } from "../api";
 
 const AuthContext = createContext(null);
 
@@ -11,7 +11,8 @@ export function AuthProvider({ children }) {
     const stored = localStorage.getItem("sp_user");
     if (stored) {
       try {
-        setUser(JSON.parse(stored));
+        const u = JSON.parse(stored);
+        setUser(u);
       } catch (e) {
         localStorage.removeItem("sp_user");
       }
@@ -19,16 +20,22 @@ export function AuthProvider({ children }) {
     setLoading(false);
   }, []);
 
-  // Mock login — accepts admin / admin
   const login = async (username, password) => {
-    await new Promise((r) => setTimeout(r, 500));
-    if (username === "admin" && password === "admin") {
-      const u = { ...mockUser, token: "mock-jwt-token" };
+    try {
+      const data = await api.login(username, password);
+      const u = { ...data.user, token: data.access_token };
       localStorage.setItem("sp_user", JSON.stringify(u));
       setUser(u);
       return { ok: true };
+    } catch (e) {
+      return {
+        ok: false,
+        error:
+          e?.response?.status === 401
+            ? "Invalid credentials. Try admin / admin"
+            : "Login failed. Please try again.",
+      };
     }
-    return { ok: false, error: "Invalid credentials. Try admin / admin" };
   };
 
   const logout = () => {

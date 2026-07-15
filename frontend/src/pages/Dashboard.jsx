@@ -1,10 +1,6 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import {
-  ResponsiveContainer,
-  AreaChart,
-  Area,
-} from "recharts";
+import { ResponsiveContainer, AreaChart, Area } from "recharts";
 import {
   Activity,
   AlertTriangle,
@@ -15,13 +11,8 @@ import {
   TrendingUp,
   Zap,
 } from "lucide-react";
-import {
-  mockTree,
-  flattenTargets,
-  generateSeries,
-  computeStats,
-  lossColor,
-} from "../mock";
+import { api } from "../api";
+import { lossColor } from "../constants";
 import { fmtMs, statusMeta } from "../lib/utils-sp";
 import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
@@ -52,11 +43,12 @@ function StatCard({ icon: Icon, label, value, sub, accent }) {
 }
 
 function Sparkline({ data, color }) {
+  const gid = `spark-${color.replace("#", "")}`;
   return (
     <ResponsiveContainer width="100%" height={44}>
       <AreaChart data={data} margin={{ top: 4, right: 0, left: 0, bottom: 0 }}>
         <defs>
-          <linearGradient id={`spark-${color}`} x1="0" y1="0" x2="0" y2="1">
+          <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor={color} stopOpacity={0.5} />
             <stop offset="100%" stopColor={color} stopOpacity={0} />
           </linearGradient>
@@ -66,7 +58,7 @@ function Sparkline({ data, color }) {
           dataKey="median"
           stroke={color}
           strokeWidth={1.5}
-          fill={`url(#spark-${color})`}
+          fill={`url(#${gid})`}
           isAnimationActive={false}
         />
       </AreaChart>
@@ -75,10 +67,22 @@ function Sparkline({ data, color }) {
 }
 
 function TargetCard({ target, onClick }) {
-  const series = useMemo(() => generateSeries(target, "3h"), [target]);
-  const stats = useMemo(() => computeStats(series), [series]);
+  const [spark, setSpark] = useState([]);
+  const [avg, setAvg] = useState(null);
   const meta = statusMeta[target.status] || statusMeta.up;
-  const spark = series.slice(-40);
+
+  useEffect(() => {
+    let alive = true;
+    api.series(target.id, "3h").then((d) => {
+      if (!alive) return;
+      setSpark(d.points.slice(-40));
+      setAvg(d.stats.avg);
+    }).catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [target.id]);
+
   return (
     <button
       onClick={onClick}
@@ -113,7 +117,7 @@ function TargetCard({ target, onClick }) {
       <div className="flex items-end justify-between">
         <div>
           <div className="mono text-xl font-bold text-foreground">
-            {fmtMs(stats.current)}
+            {fmtMs(target.current)}
           </div>
           <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
             current
@@ -122,9 +126,9 @@ function TargetCard({ target, onClick }) {
         <div className="text-right">
           <div
             className="mono text-sm font-semibold"
-            style={{ color: lossColor(stats.currentLoss) }}
+            style={{ color: lossColor(target.currentLoss || 0) }}
           >
-            {stats.currentLoss}%
+            {target.currentLoss || 0}%
           </div>
           <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
             loss
@@ -132,7 +136,7 @@ function TargetCard({ target, onClick }) {
         </div>
         <div className="text-right">
           <div className="mono text-sm font-semibold text-muted-foreground">
-            {fmtMs(stats.avg)}
+            {avg != null ? fmtMs(avg) : "—"}
           </div>
           <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
             avg 3h
@@ -147,24 +151,28 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const [query, setQuery] = useState("");
   const [modalOpen, setModalOpen] = useState(false);
-  const targets = useMemo(() => flattenTargets(mockTree), []);
+  const [tree, setTree] = useState([]);
+  const [overview, setOverview] = useState({ up: 0, warn: 0, down: 0, total: 0, avg_latency: 0 });
 
-  const filtered = targets.filter(
-    (t) =>
-      t.name.toLowerCase().includes(query.toLowerCase()) ||
-      t.host.toLowerCase().includes(query.toLowerCase())
-  );
+  const load = useCallback(() => {
+    api.tree().then(setTree).catch(() => {});
+    api.overview().then(setOverview).catch(() => {});
+  }, []);
 
-  const up = targets.filter((t) => t.status === "up").length;
-  const down = targets.filter((t) => t.status === "down").length;
-  const warn = targets.filter((t) => t.status === "warn").length;
-  const avgLatency =
-    targets.reduce((a, t) => a + t.baseLatency, 0) / targets.length;
+  useEffect(() => {
+    load();
+    const iv = setInterval(load, 30000);
+    return () => clearInterval(iv);
+  }, [load]);
 
-  const grouped = mockTree
+  const grouped = tree
     .map((g) => ({
       ...g,
-      items: filtered.filter((t) => t.groupId === g.id),
+      items: g.children.filter(
+        (t) =>
+          t.name.toLowerCase().includes(query.toLowerCase()) ||
+          t.host.toLowerCase().includes(query.toLowerCase())
+      ),
     }))
     .filter((g) => g.items.length > 0);
 
@@ -197,34 +205,10 @@ export default function Dashboard() {
       </div>
 
       <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatCard
-          icon={CheckCircle2}
-          label="Up"
-          value={up}
-          sub={`of ${targets.length} targets`}
-          accent="#22d3ee"
-        />
-        <StatCard
-          icon={AlertTriangle}
-          label="Degraded"
-          value={warn}
-          sub="elevated latency / loss"
-          accent="#facc15"
-        />
-        <StatCard
-          icon={Zap}
-          label="Down"
-          value={down}
-          sub="unreachable"
-          accent="#f87171"
-        />
-        <StatCard
-          icon={Gauge}
-          label="Avg Latency"
-          value={fmtMs(avgLatency)}
-          sub="across all targets"
-          accent="#a855f7"
-        />
+        <StatCard icon={CheckCircle2} label="Up" value={overview.up} sub={`of ${overview.total} targets`} accent="#22d3ee" />
+        <StatCard icon={AlertTriangle} label="Degraded" value={overview.warn} sub="elevated latency / loss" accent="#facc15" />
+        <StatCard icon={Zap} label="Down" value={overview.down} sub="unreachable" accent="#f87171" />
+        <StatCard icon={Gauge} label="Avg Latency" value={fmtMs(overview.avg_latency)} sub="across all targets" accent="#a855f7" />
       </div>
 
       {grouped.map((group) => (
@@ -240,11 +224,7 @@ export default function Dashboard() {
           </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {group.items.map((t) => (
-              <TargetCard
-                key={t.id}
-                target={t}
-                onClick={() => navigate(`/target/${t.id}`)}
-              />
+              <TargetCard key={t.id} target={t} onClick={() => navigate(`/target/${t.id}`)} />
             ))}
           </div>
         </div>
@@ -255,12 +235,12 @@ export default function Dashboard() {
           <Activity className="mb-3 h-8 w-8 text-muted-foreground" />
           <div className="font-medium">No targets found</div>
           <div className="text-sm text-muted-foreground">
-            Try a different search term
+            {query ? "Try a different search term" : "Add a target to start monitoring"}
           </div>
         </div>
       )}
 
-      <TargetFormModal open={modalOpen} onOpenChange={setModalOpen} />
+      <TargetFormModal open={modalOpen} onOpenChange={setModalOpen} onSaved={load} />
     </div>
   );
 }

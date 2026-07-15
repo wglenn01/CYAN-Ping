@@ -1,16 +1,14 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   BellRing,
   AlertTriangle,
   AlertOctagon,
   CheckCircle2,
-  Plus,
   ChevronRight,
 } from "lucide-react";
-import { mockAlerts, mockAlertRules } from "../mock";
+import { api } from "../api";
 import { timeAgo } from "../lib/utils-sp";
-import { Button } from "../components/ui/button";
 import { Switch } from "../components/ui/switch";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/tabs";
 import { toast } from "sonner";
@@ -50,13 +48,10 @@ function AlertRow({ alert, onClick }) {
         </div>
       </div>
       <div className="hidden shrink-0 text-right sm:block">
-        <div
-          className="text-xs font-medium"
-          style={{ color: alert.status === "resolved" ? "#4ade80" : color }}
-        >
+        <div className="text-xs font-medium" style={{ color: alert.status === "resolved" ? "#4ade80" : color }}>
           {alert.status === "resolved" ? "Resolved" : "Active"}
         </div>
-        <div className="text-xs text-muted-foreground">{timeAgo(alert.since)}</div>
+        <div className="text-xs text-muted-foreground">{alert.since ? timeAgo(alert.since) : ""}</div>
       </div>
       <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
     </button>
@@ -65,28 +60,42 @@ function AlertRow({ alert, onClick }) {
 
 export default function Alerts() {
   const navigate = useNavigate();
-  const [rules, setRules] = useState(mockAlertRules);
-  const active = mockAlerts.filter((a) => a.status === "active");
-  const resolved = mockAlerts.filter((a) => a.status === "resolved");
+  const [alerts, setAlerts] = useState([]);
+  const [rules, setRules] = useState([]);
 
-  const toggleRule = (id) => {
-    setRules((rs) =>
-      rs.map((r) => (r.id === id ? { ...r, enabled: !r.enabled } : r))
-    );
-    toast.success("Rule updated");
+  const load = () => {
+    api.alerts().then(setAlerts).catch(() => {});
+    api.alertRules().then(setRules).catch(() => {});
+  };
+
+  useEffect(() => {
+    load();
+    const iv = setInterval(load, 30000);
+    return () => clearInterval(iv);
+  }, []);
+
+  const active = alerts.filter((a) => a.status === "active");
+  const resolved = alerts.filter((a) => a.status === "resolved");
+
+  const toggleRule = async (r) => {
+    try {
+      await api.updateRule(r.id, !r.enabled);
+      setRules((rs) => rs.map((x) => (x.id === r.id ? { ...x, enabled: !x.enabled } : x)));
+      toast.success(`Rule "${r.name}" ${!r.enabled ? "enabled" : "disabled"}`);
+    } catch (e) {
+      toast.error("Could not update rule");
+    }
   };
 
   return (
     <div className="mx-auto max-w-[1100px] p-4 lg:p-6">
-      <div className="mb-6 flex items-center justify-between">
-        <div>
-          <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight">
-            <BellRing className="h-6 w-6 text-purple-400" /> Alerts
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            Notifications and threshold rules for your monitored targets
-          </p>
-        </div>
+      <div className="mb-6">
+        <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight">
+          <BellRing className="h-6 w-6 text-purple-400" /> Alerts
+        </h1>
+        <p className="text-sm text-muted-foreground">
+          Notifications and threshold rules for your monitored targets
+        </p>
       </div>
 
       <Tabs defaultValue="active">
@@ -106,11 +115,7 @@ export default function Alerts() {
         <TabsContent value="active" className="mt-4 space-y-3">
           {active.length ? (
             active.map((a) => (
-              <AlertRow
-                key={a.id}
-                alert={a}
-                onClick={() => navigate(`/target/${a.targetId}`)}
-              />
+              <AlertRow key={a.id} alert={a} onClick={() => navigate(`/target/${a.targetId}`)} />
             ))
           ) : (
             <EmptyState label="No active alerts — all systems healthy" />
@@ -120,11 +125,7 @@ export default function Alerts() {
         <TabsContent value="resolved" className="mt-4 space-y-3">
           {resolved.length ? (
             resolved.map((a) => (
-              <AlertRow
-                key={a.id}
-                alert={a}
-                onClick={() => navigate(`/target/${a.targetId}`)}
-              />
+              <AlertRow key={a.id} alert={a} onClick={() => navigate(`/target/${a.targetId}`)} />
             ))
           ) : (
             <EmptyState label="No resolved alerts yet" />
@@ -132,25 +133,11 @@ export default function Alerts() {
         </TabsContent>
 
         <TabsContent value="rules" className="mt-4 space-y-3">
-          <div className="mb-2 flex justify-end">
-            <Button
-              onClick={() => toast.info("Rule editor coming with backend")}
-              className="bg-gradient-to-r from-cyan-400 to-purple-500 font-semibold text-slate-950 hover:opacity-90"
-            >
-              <Plus className="mr-1.5 h-4 w-4" /> New Rule
-            </Button>
-          </div>
           {rules.map((r) => {
-            const meta = severityMeta[r.severity];
+            const meta = severityMeta[r.severity] || severityMeta.warning;
             return (
-              <div
-                key={r.id}
-                className="glass flex items-center gap-4 rounded-xl p-4"
-              >
-                <div
-                  className="flex h-10 w-10 items-center justify-center rounded-xl"
-                  style={{ background: `${meta.color}1a` }}
-                >
+              <div key={r.id} className="glass flex items-center gap-4 rounded-xl p-4">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: `${meta.color}1a` }}>
                   <meta.icon className="h-5 w-5" style={{ color: meta.color }} />
                 </div>
                 <div className="flex-1">
@@ -160,13 +147,11 @@ export default function Alerts() {
                     {r.condition === "latency" ? "ms" : "%"} · {meta.label}
                   </div>
                 </div>
-                <Switch
-                  checked={r.enabled}
-                  onCheckedChange={() => toggleRule(r.id)}
-                />
+                <Switch checked={r.enabled} onCheckedChange={() => toggleRule(r)} />
               </div>
             );
           })}
+          {rules.length === 0 && <EmptyState label="No rules configured" />}
         </TabsContent>
       </Tabs>
     </div>

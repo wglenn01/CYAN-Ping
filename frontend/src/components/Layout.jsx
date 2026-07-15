@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Outlet, useNavigate, useLocation } from "react-router-dom";
 import {
   Activity,
@@ -12,8 +12,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import TargetTree from "./TargetTree";
-import { mockAlerts } from "../mock";
-import { Button } from "./ui/button";
+import { api } from "../api";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -35,7 +34,26 @@ export default function Layout() {
   const navigate = useNavigate();
   const location = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const activeAlerts = mockAlerts.filter((a) => a.status === "active").length;
+  const [activeAlerts, setActiveAlerts] = useState(0);
+  const [total, setTotal] = useState(0);
+
+  useEffect(() => {
+    let alive = true;
+    const load = () => {
+      api.alerts().then((a) => {
+        if (alive) setActiveAlerts(a.filter((x) => x.status === "active").length);
+      }).catch(() => {});
+      api.overview().then((o) => {
+        if (alive) setTotal(o.total);
+      }).catch(() => {});
+    };
+    load();
+    const iv = setInterval(load, 30000);
+    return () => {
+      alive = false;
+      clearInterval(iv);
+    };
+  }, [location.pathname]);
 
   const SidebarContent = () => (
     <div className="flex h-full flex-col">
@@ -98,12 +116,10 @@ export default function Layout() {
 
   return (
     <div className="flex h-screen w-full overflow-hidden">
-      {/* Desktop sidebar */}
       <aside className="hidden w-72 shrink-0 border-r border-border/60 bg-card/40 backdrop-blur-xl lg:block">
         <SidebarContent />
       </aside>
 
-      {/* Mobile drawer */}
       {mobileOpen && (
         <div className="fixed inset-0 z-50 lg:hidden">
           <div
@@ -122,7 +138,6 @@ export default function Layout() {
         </div>
       )}
 
-      {/* Main */}
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-16 shrink-0 items-center gap-3 border-b border-border/60 bg-card/30 px-4 backdrop-blur-xl lg:px-6">
           <button
@@ -136,14 +151,14 @@ export default function Layout() {
             <span className="live-dot h-2 w-2 rounded-full bg-cyan-400" />
             <span className="text-xs font-medium text-cyan-300">Live</span>
             <span className="hidden text-xs text-muted-foreground sm:inline">
-              polling every 60s
+              probing continuously
             </span>
           </div>
 
           <div className="ml-auto flex items-center gap-3">
             <div className="hidden items-center gap-1.5 text-xs text-muted-foreground sm:flex">
               <Radio className="h-3.5 w-3.5 text-purple-400" />
-              10 targets
+              {total} targets
             </div>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>

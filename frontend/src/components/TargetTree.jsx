@@ -1,21 +1,40 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { ChevronRight, Folder, FolderOpen, Circle } from "lucide-react";
-import { mockTree } from "../mock";
+import { api } from "../api";
 import { statusMeta } from "../lib/utils-sp";
 
-export default function TargetTree({ onNavigate }) {
-  const [open, setOpen] = useState(() =>
-    Object.fromEntries(mockTree.map((g) => [g.id, true]))
-  );
+export default function TargetTree({ onNavigate, refreshKey }) {
+  const [tree, setTree] = useState([]);
+  const [open, setOpen] = useState({});
   const navigate = useNavigate();
   const { id } = useParams();
+
+  useEffect(() => {
+    let alive = true;
+    const load = () =>
+      api.tree().then((data) => {
+        if (!alive) return;
+        setTree(data);
+        setOpen((prev) =>
+          Object.keys(prev).length
+            ? prev
+            : Object.fromEntries(data.map((g) => [g.id, true]))
+        );
+      }).catch(() => {});
+    load();
+    const iv = setInterval(load, 30000);
+    return () => {
+      alive = false;
+      clearInterval(iv);
+    };
+  }, [refreshKey]);
 
   const toggle = (gid) => setOpen((o) => ({ ...o, [gid]: !o[gid] }));
 
   return (
     <div className="space-y-1">
-      {mockTree.map((group) => {
+      {tree.map((group) => {
         const isOpen = open[group.id];
         return (
           <div key={group.id}>
@@ -74,6 +93,11 @@ export default function TargetTree({ onNavigate }) {
           </div>
         );
       })}
+      {tree.length === 0 && (
+        <div className="px-3 py-6 text-center text-xs text-muted-foreground">
+          Loading targets…
+        </div>
+      )}
     </div>
   );
 }

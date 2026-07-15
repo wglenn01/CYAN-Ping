@@ -10,7 +10,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import { formatTime, fmtMs } from "../lib/utils-sp";
-import { lossColor, LOSS_COLORS } from "../mock";
+import { lossColor, LOSS_COLORS } from "../constants";
 
 function SmokeTooltip({ active, payload, rangeKey }) {
   if (!active || !payload || !payload.length) return null;

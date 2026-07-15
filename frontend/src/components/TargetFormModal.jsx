@@ -17,21 +17,31 @@ import {
   SelectTrigger,
   SelectValue,
 } from "./ui/select";
-import { PROBES, mockTree } from "../mock";
+import { PROBES } from "../constants";
+import { api } from "../api";
 import { toast } from "sonner";
-import { Activity } from "lucide-react";
+import { Activity, Loader2 } from "lucide-react";
 
-const empty = {
-  name: "",
-  host: "",
-  probe: "ICMP",
-  interval: 60,
-  group: mockTree[0]?.id || "",
-};
-
-export default function TargetFormModal({ open, onOpenChange, target }) {
-  const [form, setForm] = useState(empty);
+export default function TargetFormModal({ open, onOpenChange, target, onSaved }) {
+  const [groups, setGroups] = useState([]);
+  const [form, setForm] = useState({
+    name: "",
+    host: "",
+    probe: "ICMP",
+    interval: 60,
+    group_id: "",
+  });
+  const [saving, setSaving] = useState(false);
   const editing = !!target;
+
+  useEffect(() => {
+    if (open) {
+      api.groups().then((g) => {
+        setGroups(g);
+        setForm((f) => ({ ...f, group_id: f.group_id || g[0]?.id || "" }));
+      }).catch(() => {});
+    }
+  }, [open]);
 
   useEffect(() => {
     if (target) {
@@ -40,25 +50,40 @@ export default function TargetFormModal({ open, onOpenChange, target }) {
         host: target.host,
         probe: target.probe,
         interval: target.interval,
-        group: target.groupId || mockTree[0]?.id,
+        group_id: target.group_id,
       });
     } else {
-      setForm(empty);
+      setForm({ name: "", host: "", probe: "ICMP", interval: 60, group_id: "" });
     }
   }, [target, open]);
 
   const probe = PROBES.find((p) => p.key === form.probe) || PROBES[0];
 
-  const save = () => {
+  const save = async () => {
     if (!form.name.trim() || !form.host.trim()) {
       toast.error("Name and host are required");
       return;
     }
-    toast.success(
-      editing ? `Target "${form.name}" updated` : `Target "${form.name}" added`,
-      { description: "Saved locally (demo). Backend will persist this soon." }
-    );
-    onOpenChange(false);
+    setSaving(true);
+    try {
+      if (editing) {
+        await api.updateTarget(target.id, form);
+        toast.success(`Target "${form.name}" updated`);
+      } else {
+        await api.createTarget(form);
+        toast.success(`Target "${form.name}" added`, {
+          description: "Live probing has started for this target.",
+        });
+      }
+      onOpenChange(false);
+      onSaved?.();
+    } catch (e) {
+      toast.error("Could not save target", {
+        description: e?.response?.data?.detail || "Please try again.",
+      });
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -107,14 +132,14 @@ export default function TargetFormModal({ open, onOpenChange, target }) {
             <div className="space-y-2">
               <Label>Group</Label>
               <Select
-                value={form.group}
-                onValueChange={(v) => setForm({ ...form, group: v })}
+                value={form.group_id}
+                onValueChange={(v) => setForm({ ...form, group_id: v })}
               >
                 <SelectTrigger className="bg-background/50">
-                  <SelectValue />
+                  <SelectValue placeholder="Select group" />
                 </SelectTrigger>
                 <SelectContent>
-                  {mockTree.map((g) => (
+                  {groups.map((g) => (
                     <SelectItem key={g.id} value={g.id}>
                       {g.name}
                     </SelectItem>
@@ -155,8 +180,10 @@ export default function TargetFormModal({ open, onOpenChange, target }) {
           </Button>
           <Button
             onClick={save}
+            disabled={saving}
             className="bg-gradient-to-r from-cyan-400 to-purple-500 font-semibold text-slate-950 hover:opacity-90"
           >
+            {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             {editing ? "Save changes" : "Add target"}
           </Button>
         </DialogFooter>
