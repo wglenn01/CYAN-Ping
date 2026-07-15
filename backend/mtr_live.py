@@ -46,7 +46,12 @@ class HopStat:
         if worst is not None:
             self.worst = worst if self.worst is None else max(self.worst, worst)
         v = avg if avg is not None else last
-        self.series.append({"t": t_ms, "v": round(v, 3) if v is not None else None})
+        batch_loss = round((snt - recv) / snt * 100, 1) if snt else 0.0
+        self.series.append({
+            "t": t_ms,
+            "v": round(v, 3) if v is not None else None,
+            "loss": batch_loss,
+        })
 
     def to_dict(self, idx):
         loss = round((self.sent - self.recv) / self.sent * 100, 1) if self.sent else 0.0
@@ -55,7 +60,7 @@ class HopStat:
         stdev = round(pstdev(vals), 3) if len(vals) > 1 else 0.0
         return {
             "hop": idx, "host": self.host, "loss": loss, "sent": self.sent,
-            "last": self.last, "avg": avg, "best": self.best,
+            "recv": self.recv, "last": self.last, "avg": avg, "best": self.best,
             "worst": self.worst, "stdev": stdev, "series": list(self.series),
         }
 

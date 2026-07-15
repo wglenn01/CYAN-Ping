@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { ResponsiveContainer, AreaChart, Area, YAxis } from "recharts";
+import { ResponsiveContainer, AreaChart, Area, YAxis, Tooltip } from "recharts";
 import {
   Route,
   Play,
@@ -7,7 +7,6 @@ import {
   Loader2,
   ShieldAlert,
   Server,
-  Radio,
 } from "lucide-react";
 import { api } from "../api";
 import { lossColor } from "../constants";
@@ -15,29 +14,95 @@ import { fmtMs } from "../lib/utils-sp";
 import { Button } from "./ui/button";
 import { toast } from "sonner";
 
-function HopGraph({ series, color }) {
-  const gid = `hop-${color.replace("#", "")}`;
+const WIN = 60; // samples shown in the scrolling window
+
+function buildWindow(series) {
+  const pts = (series || []).slice(-WIN);
+  const pad = WIN - pts.length;
+  const data = [];
+  for (let i = 0; i < pad; i++) data.push({ i, v: null, loss: null });
+  pts.forEach((p, k) => data.push({ i: pad + k, v: p.v, loss: p.loss }));
+  return data;
+}
+
+const LossDot = (props) => {
+  const { cx, cy, payload } = props;
+  if (cx == null || cy == null || !payload || !payload.loss) return null;
+  return <circle cx={cx} cy={cy} r={2.5} fill="#f87171" stroke="#0a0a0f" strokeWidth={0.5} />;
+};
+
+function StripChart({ series, color }) {
+  const data = buildWindow(series);
+  const gid = `mtr-${color.replace("#", "")}`;
   return (
-    <ResponsiveContainer width="100%" height={40}>
-      <AreaChart data={series} margin={{ top: 3, right: 0, left: 0, bottom: 0 }}>
-        <defs>
-          <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={color} stopOpacity={0.45} />
-            <stop offset="100%" stopColor={color} stopOpacity={0} />
-          </linearGradient>
-        </defs>
-        <YAxis hide domain={["dataMin", "dataMax"]} />
-        <Area
-          type="monotone"
-          dataKey="v"
-          stroke={color}
-          strokeWidth={1.5}
-          fill={`url(#${gid})`}
-          isAnimationActive={false}
-          connectNulls
-        />
-      </AreaChart>
-    </ResponsiveContainer>
+    <div className="relative h-16 w-full">
+      <ResponsiveContainer width="100%" height="100%">
+        <AreaChart data={data} margin={{ top: 6, right: 0, left: 0, bottom: 0 }}>
+          <defs>
+            <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={color} stopOpacity={0.5} />
+              <stop offset="100%" stopColor={color} stopOpacity={0.02} />
+            </linearGradient>
+          </defs>
+          <YAxis hide domain={["dataMin", "dataMax"]} />
+          <Tooltip
+            cursor={false}
+            contentStyle={{
+              background: "rgba(20,20,31,0.9)", border: "1px solid #333",
+              borderRadius: 8, fontSize: 11, padding: "4px 8px",
+            }}
+            labelFormatter={() => ""}
+            formatter={(val, name, p) => [
+              `${fmtMs(val)}${p.payload.loss ? ` · loss ${p.payload.loss}%` : ""}`,
+              "rtt",
+            ]}
+          />
+          <Area
+            type="monotone" dataKey="v" stroke={color} strokeWidth={1.75}
+            fill={`url(#${gid})`} isAnimationActive={false}
+            connectNulls={false} dot={<LossDot />} activeDot={{ r: 3, fill: color }}
+          />
+        </AreaChart>
+      </ResponsiveContainer>
+      {/* fixed center pointer — waveform scrolls behind it */}
+      <div className="pointer-events-none absolute inset-y-0 left-1/2 -translate-x-1/2">
+        <div className="absolute left-1/2 top-0 -translate-x-1/2 border-x-[4px] border-t-[6px] border-x-transparent border-t-cyan-300" />
+        <div className="h-full w-px bg-cyan-300/40" style={{ boxShadow: "0 0 6px rgba(34,211,238,0.5)" }} />
+      </div>
+    </div>
+  );
+}
+
+function LossTimeline({ series }) {
+  const pts = (series || []).slice(-WIN);
+  const pad = WIN - pts.length;
+  return (
+    <div className="mt-1.5 flex h-1.5 w-full gap-px overflow-hidden rounded-sm">
+      {Array.from({ length: pad }).map((_, i) => (
+        <div key={`p${i}`} className="flex-1 bg-white/5" />
+      ))}
+      {pts.map((p, i) => {
+        const lost = p.loss >= 100 || p.v == null;
+        const part = p.loss > 0 && !lost;
+        return (
+          <div
+            key={i}
+            className="flex-1"
+            title={`loss ${p.loss ?? 0}%`}
+            style={{ background: lost ? "#ef4444" : part ? "#fb923c" : "#22d3ee55" }}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+function Stat({ label, value, color }) {
+  return (
+    <div className="min-w-0">
+      <div className="text-[9px] uppercase tracking-wider text-muted-foreground/70">{label}</div>
+      <div className="mono truncate text-xs font-medium" style={{ color: color || undefined }}>{value}</div>
+    </div>
   );
 }
 
@@ -53,29 +118,34 @@ function LiveHopRow({ hop }) {
         <div className="flex min-w-0 flex-1 items-center gap-1.5">
           <Server className="h-3 w-3 shrink-0 text-muted-foreground/50" />
           <span className={`mono truncate text-sm ${isUnknown ? "text-muted-foreground/50" : "text-foreground"}`}>
-            {isUnknown ? "* * *" : hop.host}
+            {isUnknown ? "* * * (no reply)" : hop.host}
           </span>
         </div>
-        <div className="mono shrink-0 text-right">
-          <span className="text-base font-semibold text-cyan-300">
-            {hop.avg != null ? fmtMs(hop.avg) : "—"}
-          </span>
+        <div className="mono shrink-0 text-right leading-tight">
+          <div className="text-base font-semibold text-cyan-300">{hop.avg != null ? fmtMs(hop.avg) : "—"}</div>
+          <div className="text-[9px] uppercase tracking-wider text-muted-foreground/70">avg</div>
         </div>
-        <div className="mono w-14 shrink-0 text-right text-xs" style={{ color }}>
+        <div
+          className="mono w-16 shrink-0 rounded-md px-2 py-1 text-right text-xs font-semibold"
+          style={{ background: `${color}1a`, color }}
+        >
           {(hop.loss ?? 0).toFixed(1)}%
         </div>
       </div>
 
       <div className="mt-2">
-        <HopGraph series={hop.series || []} color={color} />
+        <StripChart series={hop.series || []} color={color} />
+        <LossTimeline series={hop.series || []} />
       </div>
 
-      <div className="mono mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-[10px] text-muted-foreground">
-        <span>Snt <span className="text-foreground/70">{hop.sent}</span></span>
-        <span>Last <span className="text-foreground/70">{hop.last != null ? fmtMs(hop.last) : "—"}</span></span>
-        <span>Best <span className="text-emerald-300/80">{hop.best != null ? fmtMs(hop.best) : "—"}</span></span>
-        <span>Wrst <span className="text-orange-300/80">{hop.worst != null ? fmtMs(hop.worst) : "—"}</span></span>
-        <span>StDev <span className="text-sky-300/80">{hop.stdev != null ? fmtMs(hop.stdev) : "—"}</span></span>
+      <div className="mt-2 grid grid-cols-4 gap-x-3 gap-y-1.5 border-t border-border/40 pt-2 sm:grid-cols-7">
+        <Stat label="Last" value={hop.last != null ? fmtMs(hop.last) : "—"} />
+        <Stat label="Best" value={hop.best != null ? fmtMs(hop.best) : "—"} color="#4ade80" />
+        <Stat label="Wrst" value={hop.worst != null ? fmtMs(hop.worst) : "—"} color="#fb923c" />
+        <Stat label="Jitter" value={hop.stdev != null ? fmtMs(hop.stdev) : "—"} color="#38bdf8" />
+        <Stat label="Sent" value={hop.sent ?? 0} />
+        <Stat label="Recv" value={hop.recv ?? 0} color="#4ade80" />
+        <Stat label="Drop" value={(hop.sent || 0) - (hop.recv || 0)} color="#f87171" />
       </div>
     </div>
   );
@@ -114,7 +184,6 @@ export default function MtrPanel({ targetId }) {
     pollRef.current = setInterval(poll, 1000);
   }, [poll]);
 
-  // On mount: reconnect to a running session if one exists
   useEffect(() => {
     api.liveMtr(targetId).then((s) => {
       applyState(s);
@@ -159,17 +228,23 @@ export default function MtrPanel({ targetId }) {
     toast.info("Live MTR stopped");
   };
 
+  const totalDrop = hops.reduce((a, h) => a + ((h.sent || 0) - (h.recv || 0)), 0);
+  const worstLoss = hops.reduce((a, h) => Math.max(a, h.loss || 0), 0);
+
   return (
     <div>
       <div className="mb-4 flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
-        <div className="flex items-center gap-3">
-          <h2 className="text-sm font-semibold uppercase tracking-wider">
-            Route Analysis (MTR)
-          </h2>
+        <div className="flex flex-wrap items-center gap-2">
+          <h2 className="text-sm font-semibold uppercase tracking-wider">Route Analysis (MTR)</h2>
           {running && (
             <span className="flex items-center gap-1.5 rounded-full border border-cyan-400/20 bg-cyan-400/5 px-2.5 py-1 text-[11px] font-medium text-cyan-300">
               <span className="live-dot h-1.5 w-1.5 rounded-full bg-cyan-400" />
-              Live · {cycles} cycles · {elapsed}s
+              Live · {cycles} cycles · {elapsed}s · {hops.length} hops
+            </span>
+          )}
+          {running && worstLoss > 0 && (
+            <span className="mono rounded-full bg-red-500/10 px-2 py-1 text-[11px] text-red-300">
+              {totalDrop} dropped · worst {worstLoss}%
             </span>
           )}
         </div>
@@ -204,16 +279,15 @@ export default function MtrPanel({ targetId }) {
 
       {hops.length > 0 ? (
         <div className="space-y-2">
-          {hops.map((h, i) => (
-            <LiveHopRow key={`${h.hop}-${i}`} hop={h} />
-          ))}
+          {hops.map((h, i) => <LiveHopRow key={`${h.hop}-${i}`} hop={h} />)}
         </div>
       ) : !notAvailable ? (
         <div className="flex flex-col items-center justify-center rounded-xl border border-border/50 py-12 text-center">
           <Route className="mb-3 h-8 w-8 text-muted-foreground" />
-          <div className="text-sm text-muted-foreground">
+          <div className="max-w-md text-sm text-muted-foreground">
             Click “Start Live MTR” to continuously trace the path (0.25s pings).
-            Each hop gets a live latency graph — press Stop when done.
+            Each hop gets a live scrolling latency graph with a center pointer,
+            a packet-loss timeline, and full stats — press Stop when done.
           </div>
         </div>
       ) : null}
