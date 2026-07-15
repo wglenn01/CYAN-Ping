@@ -6,7 +6,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates mtr-tiny iputils-ping && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
+COPY requirements-deploy.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .

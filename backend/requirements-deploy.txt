@@ -1,0 +1,16 @@
+# Minimal, PyPI-only dependencies for self-hosted Docker deployment.
+# (The app's root requirements.txt in the Emergent sandbox contains extra
+#  pre-installed internal packages that are NOT needed to run CyanPing.)
+fastapi==0.110.1
+uvicorn==0.25.0
+starlette==0.37.2
+python-dotenv==1.2.2
+motor==3.3.1
+pymongo==4.6.3
+pydantic==2.13.4
+passlib==1.7.4
+bcrypt==4.1.3
+PyJWT==2.13.0
+icmplib==3.0.4
+httpx==0.28.1
+python-multipart==0.0.32
