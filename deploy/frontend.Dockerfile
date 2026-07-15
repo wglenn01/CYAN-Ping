@@ -5,8 +5,11 @@ WORKDIR /app
 ARG REACT_APP_BACKEND_URL
 ENV REACT_APP_BACKEND_URL=$REACT_APP_BACKEND_URL
 
-COPY package.json yarn.lock ./
-RUN yarn install --frozen-lockfile
+COPY package.json ./
+COPY yarn.lock* ./
+# Use the lockfile if it exists; otherwise resolve fresh so the build never
+# fails just because yarn.lock wasn't copied to the server.
+RUN if [ -f yarn.lock ]; then yarn install --frozen-lockfile; else yarn install; fi
 
 COPY . .
 RUN yarn build
