@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from auth import (verify_password, create_token, get_current_user)
 import scheduler
 import mtr as mtr_engine
+import mtr_live
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
@@ -202,6 +203,7 @@ async def update_target(tid: str, body: TargetUpdate,
 @api.delete("/targets/{tid}")
 async def delete_target(tid: str, username: str = Depends(get_current_user)):
     scheduler.stop_target(tid)
+    mtr_live.stop(tid)
     res = await db.targets.delete_one({"id": tid})
     if res.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Target not found")
@@ -317,6 +319,38 @@ async def get_target_mtr(tid: str, username: str = Depends(get_current_user)):
         result = {"timestamp": int(ts.timestamp() * 1000), "hops": r["hops"],
                   "source": r.get("source", "scheduled")}
     return {"available": mtr_engine.mtr_available(), "latest": result}
+
+
+@api.post("/targets/{tid}/mtr/start")
+async def start_live_mtr(tid: str, username: str = Depends(get_current_user)):
+    t = await db.targets.find_one({"id": tid})
+    if not t:
+        raise HTTPException(status_code=404, detail="Target not found")
+    if not mtr_live.available():
+        raise HTTPException(
+            status_code=503,
+            detail="Traceroute requires elevated privileges (raw sockets / "
+                   "NET_RAW). This works on your self-hosted deployment.",
+        )
+    s = await mtr_live.start(tid, t["host"])
+    return s.state()
+
+
+@api.post("/targets/{tid}/mtr/stop")
+async def stop_live_mtr(tid: str, username: str = Depends(get_current_user)):
+    mtr_live.stop(tid)
+    return {"ok": True}
+
+
+@api.get("/targets/{tid}/mtr/live")
+async def get_live_mtr(tid: str, username: str = Depends(get_current_user)):
+    s = mtr_live.get(tid)
+    if not s:
+        return {"running": False, "hops": [], "cycles": 0, "elapsed": 0,
+                "available": mtr_engine.mtr_available()}
+    st = s.state()
+    st["available"] = mtr_engine.mtr_available()
+    return st
 
 
 # ---------- Alerts ----------
