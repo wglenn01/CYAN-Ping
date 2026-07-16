@@ -18,7 +18,7 @@ try:
 except Exception:  # pragma: no cover
     async_ping = None
 
-MAX_SERIES = 400       # ~100s of points at 0.25s
+MAX_SERIES = 160       # ~40s of points at 0.25s (UI shows last 30s)
 POLL_TIMEOUT = 15      # auto-stop if no client poll within N seconds
 INTERVAL = 0.25        # seconds between ping cycles
 PING_TIMEOUT = 0.6     # per-hop ping timeout

@@ -35,7 +35,7 @@ export default function MtrPanel({ targetId }) {
   const startPolling = useCallback(() => {
     if (pollRef.current) clearInterval(pollRef.current);
     poll();
-    pollRef.current = setInterval(poll, 350);
+    pollRef.current = setInterval(poll, 500);
   }, [poll]);
 
   useEffect(() => {

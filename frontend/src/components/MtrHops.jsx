@@ -1,11 +1,10 @@
 import React from "react";
-import { ResponsiveContainer, AreaChart, Area, YAxis, Tooltip } from "recharts";
 import { Server } from "lucide-react";
 import { lossColor } from "../constants";
 import { fmtMs } from "../lib/utils-sp";
 
-const WINDOW_MS = 60000; // show last 60 seconds
-const MAX_POINTS = 150;
+const WINDOW_MS = 30000; // show last 30 seconds
+const MAX_POINTS = 120;
 
 function windowPoints(series) {
   const pts = series || [];
@@ -20,49 +19,37 @@ function windowPoints(series) {
   return win;
 }
 
-function buildWindow(series) {
-  return windowPoints(series).map((p, i) => ({ i, v: p.v, loss: p.loss }));
-}
+// Lightweight inline-SVG strip chart (no charting lib -> cheap, no hang).
+function LightChart({ series, color }) {
+  const pts = windowPoints(series);
+  const W = 100, H = 40;
+  const nums = pts.map((p) => p.v).filter((v) => v != null);
+  const min = nums.length ? Math.min(...nums) : 0;
+  const max = nums.length ? Math.max(...nums) : 1;
+  const span = max - min || 1;
+  const n = pts.length;
 
-const LossDot = (props) => {
-  const { cx, cy, payload } = props;
-  if (cx == null || cy == null || !payload || !payload.loss) return null;
-  return <circle cx={cx} cy={cy} r={2.5} fill="#f87171" stroke="#0a0a0f" strokeWidth={0.5} />;
-};
+  let d = "";
+  let cont = false;
+  for (let i = 0; i < n; i++) {
+    const p = pts[i];
+    if (p.v == null) { cont = false; continue; }
+    const x = n > 1 ? (i / (n - 1)) * W : W / 2;
+    const y = H - ((p.v - min) / span) * (H - 5) - 2.5;
+    d += `${cont ? "L" : "M"}${x.toFixed(2)} ${y.toFixed(2)} `;
+    cont = true;
+  }
 
-function StripChart({ series, color }) {
-  const data = buildWindow(series);
-  const gid = `mtr-${color.replace("#", "")}`;
   return (
-    <div className="relative h-16 w-full">
-      <ResponsiveContainer width="100%" height="100%">
-        <AreaChart data={data} margin={{ top: 6, right: 0, left: 0, bottom: 0 }}>
-          <defs>
-            <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor={color} stopOpacity={0.5} />
-              <stop offset="100%" stopColor={color} stopOpacity={0.02} />
-            </linearGradient>
-          </defs>
-          <YAxis hide domain={["dataMin", "dataMax"]} />
-          <Tooltip
-            cursor={false}
-            contentStyle={{
-              background: "rgba(20,20,31,0.9)", border: "1px solid #333",
-              borderRadius: 8, fontSize: 11, padding: "4px 8px",
-            }}
-            labelFormatter={() => ""}
-            formatter={(val, name, p) => [
-              `${fmtMs(val)}${p.payload.loss ? ` · loss ${p.payload.loss}%` : ""}`,
-              "rtt",
-            ]}
-          />
-          <Area
-            type="monotone" dataKey="v" stroke={color} strokeWidth={1.75}
-            fill={`url(#${gid})`} isAnimationActive={false}
-            connectNulls={false} dot={<LossDot />} activeDot={{ r: 3, fill: color }}
-          />
-        </AreaChart>
-      </ResponsiveContainer>
+    <div className="relative h-14 w-full">
+      <svg width="100%" height="100%" viewBox={`0 0 ${W} ${H}`}
+        preserveAspectRatio="none" style={{ display: "block" }}>
+        {d && (
+          <path d={d} fill="none" stroke={color} strokeWidth="1.5"
+            vectorEffect="non-scaling-stroke" strokeLinejoin="round"
+            strokeLinecap="round" />
+        )}
+      </svg>
       <div className="pointer-events-none absolute inset-y-0 left-1/2 -translate-x-1/2">
         <div className="absolute left-1/2 top-0 -translate-x-1/2 border-x-[4px] border-t-[6px] border-x-transparent border-t-cyan-300" />
         <div className="h-full w-px bg-cyan-300/40" style={{ boxShadow: "0 0 6px rgba(34,211,238,0.5)" }} />
@@ -73,7 +60,7 @@ function StripChart({ series, color }) {
 
 function LossTimeline({ series }) {
   const win = windowPoints(series);
-  const CELLS = 80;
+  const CELLS = 60;
   const cells = [];
   if (win.length) {
     const per = win.length / CELLS;
@@ -104,7 +91,7 @@ function Stat({ label, value, color }) {
   );
 }
 
-function LiveHopRow({ hop }) {
+const LiveHopRow = React.memo(function LiveHopRow({ hop }) {
   const isUnknown = !hop.host || hop.host === "???";
   const color = lossColor(hop.loss || 0);
   return (
@@ -130,7 +117,7 @@ function LiveHopRow({ hop }) {
       </div>
 
       <div className="mt-2">
-        <StripChart series={hop.series || []} color={color} />
+        <LightChart series={hop.series || []} color={color} />
         <LossTimeline series={hop.series || []} />
       </div>
 
@@ -145,7 +132,7 @@ function LiveHopRow({ hop }) {
       </div>
     </div>
   );
-}
+});
 
 export default function MtrHops({ hops }) {
   return (

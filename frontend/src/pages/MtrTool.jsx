@@ -47,7 +47,7 @@ export default function MtrTool() {
   const startPolling = useCallback((h) => {
     if (pollRef.current) clearInterval(pollRef.current);
     poll(h);
-    pollRef.current = setInterval(() => poll(h), 350);
+    pollRef.current = setInterval(() => poll(h), 500);
   }, [poll]);
 
   useEffect(() => {
