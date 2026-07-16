@@ -33,6 +33,7 @@ logging.getLogger("httpcore").setLevel(logging.WARNING)
 logger = logging.getLogger("cyanping")
 
 RANGES = {
+    "15m": (15 * 60, 90),
     "3h": (3 * 3600, 108),
     "30h": (30 * 3600, 180),
     "10d": (10 * 86400, 240),

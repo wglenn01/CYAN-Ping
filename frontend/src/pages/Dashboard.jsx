@@ -74,9 +74,9 @@ function TargetCard({ target, onClick }) {
   useEffect(() => {
     let alive = true;
     const fetchSeries = () => {
-      api.series(target.id, "3h").then((d) => {
+      api.series(target.id, "15m").then((d) => {
         if (!alive) return;
-        setSpark(d.points.slice(-40));
+        setSpark(d.points);
         setAvg(d.stats.avg);
       }).catch(() => {});
     };
@@ -144,7 +144,7 @@ function TargetCard({ target, onClick }) {
             {avg != null ? fmtMs(avg) : "—"}
           </div>
           <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-            avg 3h
+            avg 15m
           </div>
         </div>
       </div>
