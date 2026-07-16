@@ -95,6 +95,12 @@ class Session:
                 elif h["addr"]:
                     self.hops[h["idx"]].host = h["addr"]
 
+    async def _safe_discover(self):
+        try:
+            await self._discover()
+        except Exception:
+            pass
+
     async def _discover_mtr(self):
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -127,6 +133,7 @@ class Session:
             loop = asyncio.get_event_loop()
             next_t = loop.time()
             since_disc = 0
+            disc_task = None
             while self.running:
                 if time.time() - self.last_poll > POLL_TIMEOUT:
                     break
@@ -142,12 +149,10 @@ class Session:
                         st.update(up, rtt, t_ms)
                     self.cycles += 1
                 since_disc += 1
-                if since_disc >= DISCOVER_EVERY:
+                # Rediscover the path in the BACKGROUND so pinging never stalls.
+                if since_disc >= DISCOVER_EVERY and (disc_task is None or disc_task.done()):
                     since_disc = 0
-                    try:
-                        await self._discover()
-                    except Exception:
-                        pass
+                    disc_task = asyncio.create_task(self._safe_discover())
                 next_t += INTERVAL
                 delay = next_t - loop.time()
                 if delay < 0:

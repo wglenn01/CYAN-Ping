@@ -103,9 +103,9 @@ function LossTimeline({ series }) {
 
 function Stat({ label, value, color }) {
   return (
-    <div className="min-w-0">
-      <div className="text-[9px] uppercase tracking-wider text-muted-foreground/70">{label}</div>
-      <div className="mono truncate text-xs font-medium" style={{ color: color || undefined }}>{value}</div>
+    <div className="min-w-0 rounded-lg bg-white/[0.03] px-2 py-1.5 text-center" data-testid={`mtr-stat-${label.toLowerCase().replace(/[^a-z]/g, "")}`}>
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">{label}</div>
+      <div className="mono truncate text-sm font-semibold" style={{ color: color || undefined }}>{value}</div>
     </div>
   );
 }
@@ -140,14 +140,13 @@ const LiveHopRow = React.memo(function LiveHopRow({ hop }) {
         <LossTimeline series={hop.series || []} />
       </div>
 
-      <div className="mt-2 grid grid-cols-4 gap-x-3 gap-y-1.5 border-t border-border/40 pt-2 sm:grid-cols-7">
-        <Stat label="Last" value={hop.last != null ? fmtMs(hop.last) : "—"} />
+      <div className="mt-2 grid grid-cols-3 gap-1.5 border-t border-border/40 pt-2 sm:grid-cols-6">
+        <Stat label="Loss%" value={`${(hop.loss ?? 0).toFixed(1)}%`} color={color} />
+        <Stat label="Snt" value={hop.sent ?? 0} />
+        <Stat label="Avg" value={hop.avg != null ? fmtMs(hop.avg) : "—"} color="#22d3ee" />
         <Stat label="Best" value={hop.best != null ? fmtMs(hop.best) : "—"} color="#4ade80" />
         <Stat label="Wrst" value={hop.worst != null ? fmtMs(hop.worst) : "—"} color="#fb923c" />
-        <Stat label="Jitter" value={hop.stdev != null ? fmtMs(hop.stdev) : "—"} color="#38bdf8" />
-        <Stat label="Sent" value={hop.sent ?? 0} />
-        <Stat label="Recv" value={hop.recv ?? 0} color="#4ade80" />
-        <Stat label="Drop" value={(hop.sent || 0) - (hop.recv || 0)} color="#f87171" />
+        <Stat label="StDev" value={hop.stdev != null ? fmtMs(hop.stdev) : "—"} color="#a78bfa" />
       </div>
     </div>
   );
