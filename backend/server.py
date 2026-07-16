@@ -74,6 +74,10 @@ class RuleUpdate(BaseModel):
     enabled: bool
 
 
+class MtrToolIn(BaseModel):
+    host: str
+
+
 # ---------- Helpers ----------
 def clean(doc):
     if doc and "_id" in doc:
@@ -345,6 +349,41 @@ async def stop_live_mtr(tid: str, username: str = Depends(get_current_user)):
 @api.get("/targets/{tid}/mtr/live")
 async def get_live_mtr(tid: str, username: str = Depends(get_current_user)):
     s = mtr_live.get(tid)
+    if not s:
+        return {"running": False, "hops": [], "cycles": 0, "elapsed": 0,
+                "available": mtr_engine.mtr_available()}
+    st = s.state()
+    st["available"] = mtr_engine.mtr_available()
+    return st
+
+
+# ---------- Ad-hoc MTR tool (any host) ----------
+@api.post("/mtr/tool/start")
+async def mtr_tool_start(body: MtrToolIn, username: str = Depends(get_current_user)):
+    host = (body.host or "").strip()
+    if not host:
+        raise HTTPException(status_code=400, detail="Host is required")
+    if not mtr_live.available():
+        raise HTTPException(
+            status_code=503,
+            detail="Traceroute requires elevated privileges (raw sockets / "
+                   "NET_RAW). This works on your self-hosted deployment.",
+        )
+    s = await mtr_live.start(f"tool:{host}", host)
+    st = s.state()
+    st["available"] = True
+    return st
+
+
+@api.post("/mtr/tool/stop")
+async def mtr_tool_stop(body: MtrToolIn, username: str = Depends(get_current_user)):
+    mtr_live.stop(f"tool:{(body.host or '').strip()}")
+    return {"ok": True}
+
+
+@api.get("/mtr/tool/live")
+async def mtr_tool_live(host: str, username: str = Depends(get_current_user)):
+    s = mtr_live.get(f"tool:{host.strip()}")
     if not s:
         return {"running": False, "hops": [], "cycles": 0, "elapsed": 0,
                 "available": mtr_engine.mtr_available()}

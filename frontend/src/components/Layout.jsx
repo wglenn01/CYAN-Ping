@@ -9,6 +9,7 @@ import {
   Menu,
   X,
   Radio,
+  Radar,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import TargetTree from "./TargetTree";
@@ -25,6 +26,7 @@ import { Avatar, AvatarFallback } from "./ui/avatar";
 
 const navItems = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
+  { to: "/mtr", label: "MTR Tool", icon: Radar },
   { to: "/alerts", label: "Alerts", icon: BellRing },
   { to: "/settings", label: "Settings", icon: SettingsIcon },
 ];

@@ -46,6 +46,10 @@ export const api = {
   startLiveMtr: (id) => client.post(`/targets/${id}/mtr/start`).then((r) => r.data),
   stopLiveMtr: (id) => client.post(`/targets/${id}/mtr/stop`).then((r) => r.data),
   liveMtr: (id) => client.get(`/targets/${id}/mtr/live`).then((r) => r.data),
+  startMtrTool: (host) => client.post(`/mtr/tool/start`, { host }).then((r) => r.data),
+  stopMtrTool: (host) => client.post(`/mtr/tool/stop`, { host }).then((r) => r.data),
+  liveMtrTool: (host) =>
+    client.get(`/mtr/tool/live`, { params: { host } }).then((r) => r.data),
   alerts: () => client.get("/alerts").then((r) => r.data),
   alertRules: () => client.get("/alert-rules").then((r) => r.data),
   updateRule: (id, enabled) =>

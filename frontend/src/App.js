@@ -8,6 +8,7 @@ import Dashboard from "./pages/Dashboard";
 import TargetDetail from "./pages/TargetDetail";
 import Alerts from "./pages/Alerts";
 import Settings from "./pages/Settings";
+import MtrTool from "./pages/MtrTool";
 import { Toaster } from "./components/ui/sonner";
 
 function Protected({ children }) {
@@ -30,6 +31,7 @@ function AppRoutes() {
       >
         <Route path="/" element={<Dashboard />} />
         <Route path="/target/:id" element={<TargetDetail />} />
+        <Route path="/mtr" element={<MtrTool />} />
         <Route path="/alerts" element={<Alerts />} />
         <Route path="/settings" element={<Settings />} />
       </Route>
