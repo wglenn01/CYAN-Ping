@@ -28,24 +28,43 @@ function LightChart({ series, color }) {
   const max = nums.length ? Math.max(...nums) : 1;
   const span = max - min || 1;
   const n = pts.length;
+  const gid = `mtrfill-${color.replace("#", "")}`;
 
-  let d = "";
-  let cont = false;
+  // split into continuous segments (breaks where packets were lost)
+  const segments = [];
+  let cur = [];
   for (let i = 0; i < n; i++) {
     const p = pts[i];
-    if (p.v == null) { cont = false; continue; }
+    if (p.v == null) { if (cur.length) segments.push(cur); cur = []; continue; }
     const x = n > 1 ? (i / (n - 1)) * W : W / 2;
-    const y = H - ((p.v - min) / span) * (H - 5) - 2.5;
-    d += `${cont ? "L" : "M"}${x.toFixed(2)} ${y.toFixed(2)} `;
-    cont = true;
+    const y = H - ((p.v - min) / span) * (H - 6) - 3;
+    cur.push({ x, y });
   }
+  if (cur.length) segments.push(cur);
+
+  const lineD = segments
+    .map((seg) => seg.map((pt, k) => `${k ? "L" : "M"}${pt.x.toFixed(2)} ${pt.y.toFixed(2)}`).join(" "))
+    .join(" ");
+  const areaD = segments
+    .map((seg) => {
+      const pts2 = seg.map((pt) => `${pt.x.toFixed(2)} ${pt.y.toFixed(2)}`).join(" L");
+      return `M${seg[0].x.toFixed(2)} ${H} L${pts2} L${seg[seg.length - 1].x.toFixed(2)} ${H} Z`;
+    })
+    .join(" ");
 
   return (
     <div className="relative h-14 w-full">
       <svg width="100%" height="100%" viewBox={`0 0 ${W} ${H}`}
         preserveAspectRatio="none" style={{ display: "block" }}>
-        {d && (
-          <path d={d} fill="none" stroke={color} strokeWidth="1.5"
+        <defs>
+          <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={color} stopOpacity="0.35" />
+            <stop offset="100%" stopColor={color} stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        {areaD && <path d={areaD} fill={`url(#${gid})`} stroke="none" />}
+        {lineD && (
+          <path d={lineD} fill="none" stroke={color} strokeWidth="1.5"
             vectorEffect="non-scaling-stroke" strokeLinejoin="round"
             strokeLinecap="round" />
         )}
