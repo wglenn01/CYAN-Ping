@@ -19,26 +19,35 @@ function windowPoints(series) {
   return win;
 }
 
+const GRID_LINES = 4;   // horizontal reference lines
+const PAD_PCT = 7.5;    // top/bottom padding inside the plot (matches SVG)
+
 // Lightweight inline-SVG strip chart (no charting lib -> cheap, no hang).
+// X axis is TIME-based over a fixed 30s window: newest sample sits at the right
+// edge and older data scrolls off (and disappears at) the left edge.
 function LightChart({ series, color }) {
   const pts = windowPoints(series);
   const W = 100, H = 40;
   const nums = pts.map((p) => p.v).filter((v) => v != null);
-  const min = nums.length ? Math.min(...nums) : 0;
-  const max = nums.length ? Math.max(...nums) : 1;
+  const hasData = nums.length > 0;
+  let min = hasData ? Math.min(...nums) : 0;
+  let max = hasData ? Math.max(...nums) : 1;
+  if (min === max) { min = Math.max(0, min - 1); max = max + 1; }
   const span = max - min || 1;
-  const n = pts.length;
   const gid = `mtrfill-${color.replace("#", "")}`;
+
+  // fixed 30s window anchored on the latest sample -> real scrolling
+  const now = pts.length ? pts[pts.length - 1].t : 0;
+  const t0 = now - WINDOW_MS;
+  const xOf = (t) => Math.max(0, Math.min(W, ((t - t0) / WINDOW_MS) * W));
+  const yOf = (v) => H - ((v - min) / span) * (H - 6) - 3;
 
   // split into continuous segments (breaks where packets were lost)
   const segments = [];
   let cur = [];
-  for (let i = 0; i < n; i++) {
-    const p = pts[i];
+  for (const p of pts) {
     if (p.v == null) { if (cur.length) segments.push(cur); cur = []; continue; }
-    const x = n > 1 ? (i / (n - 1)) * W : W / 2;
-    const y = H - ((p.v - min) / span) * (H - 6) - 3;
-    cur.push({ x, y });
+    cur.push({ x: xOf(p.t), y: yOf(p.v) });
   }
   if (cur.length) segments.push(cur);
 
@@ -52,9 +61,31 @@ function LightChart({ series, color }) {
     })
     .join(" ");
 
+  // evenly spaced background gridlines labelled with the latency at that height
+  const grid = [];
+  for (let k = 0; k < GRID_LINES; k++) {
+    const frac = k / (GRID_LINES - 1);
+    grid.push({
+      top: PAD_PCT + frac * (100 - 2 * PAD_PCT),
+      value: max - frac * (max - min),
+    });
+  }
+
+  const leadX = segments.length ? segments[segments.length - 1].slice(-1)[0].x : W;
+
   return (
-    <div className="relative h-14 w-full">
-      <svg width="100%" height="100%" viewBox={`0 0 ${W} ${H}`}
+    <div className="relative h-16 w-full overflow-hidden rounded-md bg-black/20">
+      {/* background gridlines + ms labels */}
+      {hasData && grid.map((g, i) => (
+        <div key={i} className="pointer-events-none absolute left-0 right-0 flex items-center"
+          style={{ top: `${g.top}%` }}>
+          <div className="h-px w-full bg-white/[0.06]" />
+          <span className="mono absolute right-1 -translate-y-1/2 text-[8px] leading-none text-muted-foreground/60">
+            {fmtMs(g.value)}
+          </span>
+        </div>
+      ))}
+      <svg width="100%" height="100%" viewBox={`0 0 ${W} ${H}`} className="absolute inset-0"
         preserveAspectRatio="none" style={{ display: "block" }}>
         <defs>
           <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
@@ -69,10 +100,13 @@ function LightChart({ series, color }) {
             strokeLinecap="round" />
         )}
       </svg>
-      <div className="pointer-events-none absolute inset-y-0 left-1/2 -translate-x-1/2">
-        <div className="absolute left-1/2 top-0 -translate-x-1/2 border-x-[4px] border-t-[6px] border-x-transparent border-t-cyan-300" />
-        <div className="h-full w-px bg-cyan-300/40" style={{ boxShadow: "0 0 6px rgba(34,211,238,0.5)" }} />
-      </div>
+      {/* leading-edge "now" marker that rides the newest sample */}
+      {hasData && (
+        <div className="pointer-events-none absolute inset-y-0" style={{ left: `${leadX}%` }}>
+          <div className="h-full w-px bg-cyan-300/50" style={{ boxShadow: "0 0 6px rgba(34,211,238,0.5)" }} />
+          <div className="absolute left-1/2 top-0 -translate-x-1/2 border-x-[4px] border-t-[6px] border-x-transparent border-t-cyan-300" />
+        </div>
+      )}
     </div>
   );
 }
