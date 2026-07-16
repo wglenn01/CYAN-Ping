@@ -14,15 +14,24 @@ import { fmtMs } from "../lib/utils-sp";
 import { Button } from "./ui/button";
 import { toast } from "sonner";
 
-const WIN = 60; // samples shown in the scrolling window
+const WINDOW_MS = 60000; // show last 60 seconds
+const MAX_POINTS = 150;  // cap rendered points for smooth performance
+
+function windowPoints(series) {
+  const pts = series || [];
+  if (!pts.length) return [];
+  const now = pts[pts.length - 1].t;
+  const cutoff = now - WINDOW_MS;
+  let win = pts.filter((p) => p.t >= cutoff);
+  if (win.length > MAX_POINTS) {
+    const stride = Math.ceil(win.length / MAX_POINTS);
+    win = win.filter((_, i) => i % stride === 0);
+  }
+  return win;
+}
 
 function buildWindow(series) {
-  const pts = (series || []).slice(-WIN);
-  const pad = WIN - pts.length;
-  const data = [];
-  for (let i = 0; i < pad; i++) data.push({ i, v: null, loss: null });
-  pts.forEach((p, k) => data.push({ i: pad + k, v: p.v, loss: p.loss }));
-  return data;
+  return windowPoints(series).map((p, i) => ({ i, v: p.v, loss: p.loss }));
 }
 
 const LossDot = (props) => {
@@ -74,25 +83,27 @@ function StripChart({ series, color }) {
 }
 
 function LossTimeline({ series }) {
-  const pts = (series || []).slice(-WIN);
-  const pad = WIN - pts.length;
+  const win = windowPoints(series);
+  const CELLS = 80;
+  const cells = [];
+  if (win.length) {
+    const per = win.length / CELLS;
+    for (let c = 0; c < CELLS; c++) {
+      const start = Math.floor(c * per);
+      const end = Math.max(start + 1, Math.floor((c + 1) * per));
+      const slice = win.slice(start, end);
+      const anyFull = slice.some((p) => p.loss >= 100 || p.v == null);
+      const anyPart = slice.some((p) => p.loss > 0 && p.loss < 100);
+      cells.push(anyFull ? "#ef4444" : anyPart ? "#fb923c" : "#22d3ee55");
+    }
+  }
   return (
-    <div className="mt-1.5 flex h-1.5 w-full gap-px overflow-hidden rounded-sm">
-      {Array.from({ length: pad }).map((_, i) => (
-        <div key={`p${i}`} className="flex-1 bg-white/5" />
-      ))}
-      {pts.map((p, i) => {
-        const lost = p.loss >= 100 || p.v == null;
-        const part = p.loss > 0 && !lost;
-        return (
-          <div
-            key={i}
-            className="flex-1"
-            title={`loss ${p.loss ?? 0}%`}
-            style={{ background: lost ? "#ef4444" : part ? "#fb923c" : "#22d3ee55" }}
-          />
-        );
-      })}
+    <div className="mt-1.5 flex h-1.5 w-full overflow-hidden rounded-sm">
+      {cells.length
+        ? cells.map((c, i) => (
+            <div key={i} className="flex-1" style={{ background: c }} />
+          ))
+        : <div className="w-full bg-white/5" />}
     </div>
   );
 }
@@ -181,7 +192,7 @@ export default function MtrPanel({ targetId }) {
   const startPolling = useCallback(() => {
     if (pollRef.current) clearInterval(pollRef.current);
     poll();
-    pollRef.current = setInterval(poll, 1000);
+    pollRef.current = setInterval(poll, 350);
   }, [poll]);
 
   useEffect(() => {

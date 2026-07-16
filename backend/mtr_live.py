@@ -1,9 +1,8 @@
-"""Live continuous MTR sessions for CyanPing.
+"""Live continuous MTR sessions for CyanPing (high-speed).
 
-Runs repeated short mtr batches (0.25s interval) per target, accumulating
-per-hop stats + a rolling latency time-series for live graphs. Sessions run in
-the background until stopped or until the client stops polling (auto-stop).
-Uses the `mtr` binary when available, else icmplib traceroute fallback.
+Discovers the hop path once (traceroute), then pings every hop CONCURRENTLY
+every 0.25s using icmplib (no per-cycle subprocess spawn) for smooth real-time
+updates. Rediscovers the path periodically. Keeps ~90s of per-hop history.
 Requires raw-socket / NET_RAW privileges (works on self-hosted deployment).
 """
 import asyncio
@@ -14,13 +13,19 @@ from statistics import pstdev
 
 import mtr as mtr_engine
 
-MAX_SERIES = 120       # points kept per hop for the graph
-POLL_TIMEOUT = 20      # auto-stop session if no client poll within N seconds
-BATCH_COUNT = 2        # pings per hop per batch
-INTERVAL = 0.25        # seconds between pings
-MAX_HOPS = 30
+try:
+    from icmplib import async_ping
+except Exception:  # pragma: no cover
+    async_ping = None
 
-_sessions = {}         # target_id -> Session
+MAX_SERIES = 400       # ~100s of points at 0.25s
+POLL_TIMEOUT = 15      # auto-stop if no client poll within N seconds
+INTERVAL = 0.25        # seconds between ping cycles
+PING_TIMEOUT = 0.6     # per-hop ping timeout
+MAX_HOPS = 30
+DISCOVER_EVERY = 60    # rediscover path every N cycles (~15s)
+
+_sessions = {}
 
 
 class HopStat:
@@ -34,23 +39,18 @@ class HopStat:
         self.last = None
         self.series = deque(maxlen=MAX_SERIES)
 
-    def update(self, snt, recv, last, avg, best, worst, t_ms):
-        self.sent += snt
-        self.recv += recv
-        if last is not None:
-            self.last = last
-        if avg is not None and recv > 0:
-            self.sum += avg * recv
-        if best is not None:
-            self.best = best if self.best is None else min(self.best, best)
-        if worst is not None:
-            self.worst = worst if self.worst is None else max(self.worst, worst)
-        v = avg if avg is not None else last
-        batch_loss = round((snt - recv) / snt * 100, 1) if snt else 0.0
+    def update(self, up, rtt, t_ms):
+        self.sent += 1
+        if up and rtt is not None:
+            self.recv += 1
+            self.last = rtt
+            self.sum += rtt
+            self.best = rtt if self.best is None else min(self.best, rtt)
+            self.worst = rtt if self.worst is None else max(self.worst, rtt)
         self.series.append({
             "t": t_ms,
-            "v": round(v, 3) if v is not None else None,
-            "loss": batch_loss,
+            "v": round(rtt, 3) if (up and rtt is not None) else None,
+            "loss": 0 if up else 100,
         })
 
     def to_dict(self, idx):
@@ -69,7 +69,8 @@ class Session:
     def __init__(self, target_id, host):
         self.target_id = target_id
         self.host = host
-        self.hops = {}
+        self.hops = {}          # idx -> HopStat
+        self.hop_list = []      # [{"idx","addr"}]
         self.task = None
         self.running = False
         self.started = time.time()
@@ -77,71 +78,82 @@ class Session:
         self.last_poll = time.time()
         self.error = None
 
-    async def _run_batch(self):
-        if mtr_engine.HAS_MTR:
-            return await self._batch_mtr()
-        return await self._batch_icmplib()
+    async def _discover(self):
+        lst = None
+        try:
+            hops_raw = await asyncio.wait_for(
+                asyncio.to_thread(mtr_engine._run_traceroute_sync, self.host, 1, MAX_HOPS),
+                timeout=10)
+            lst = [{"idx": h.distance, "addr": h.address} for h in hops_raw]
+        except Exception:
+            lst = await self._discover_mtr()
+        if lst:
+            self.hop_list = lst
+            for h in lst:
+                if h["idx"] not in self.hops:
+                    self.hops[h["idx"]] = HopStat(h["addr"] or "???")
+                elif h["addr"]:
+                    self.hops[h["idx"]].host = h["addr"]
 
-    async def _batch_mtr(self):
-        proc = await asyncio.create_subprocess_exec(
-            "mtr", "--json", "-c", str(BATCH_COUNT), "-i", str(INTERVAL),
-            "-m", str(MAX_HOPS), self.host,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-        )
-        out, err = await asyncio.wait_for(proc.communicate(), timeout=20)
-        data = json.loads(out.decode())
-        res = []
-        for h in data["report"]["hubs"]:
-            snt = h.get("Snt", BATCH_COUNT)
-            lossp = float(h.get("Loss%", 0))
-            recv = round(snt * (1 - lossp / 100))
-            res.append({
-                "hop": h.get("count"), "host": h.get("host", "???"),
-                "snt": snt, "recv": recv, "last": h.get("Last"),
-                "avg": h.get("Avg"), "best": h.get("Best"), "worst": h.get("Wrst"),
-            })
-        return res
+    async def _discover_mtr(self):
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "mtr", "--json", "-c", "1", "-m", str(MAX_HOPS), self.host,
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            out, _ = await asyncio.wait_for(proc.communicate(), timeout=15)
+            data = json.loads(out.decode())
+            return [{"idx": h.get("count"), "addr": h.get("host")}
+                    for h in data["report"]["hubs"]]
+        except Exception:
+            return []
 
-    async def _batch_icmplib(self):
-        hops_raw = await asyncio.to_thread(
-            mtr_engine._run_traceroute_sync, self.host, BATCH_COUNT, MAX_HOPS)
-        res = []
-        for h in hops_raw:
-            recv = len(h.rtts)
-            res.append({
-                "hop": h.distance, "host": h.address or "???",
-                "snt": BATCH_COUNT, "recv": recv,
-                "last": round(h.rtts[-1], 2) if h.rtts else None,
-                "avg": round(h.avg_rtt, 2) if recv else None,
-                "best": round(h.min_rtt, 2) if recv else None,
-                "worst": round(h.max_rtt, 2) if recv else None,
-            })
-        return res
+    async def _ping_hop(self, addr):
+        if not addr or addr == "???" or async_ping is None:
+            return (False, None)
+        try:
+            h = await async_ping(addr, count=1, timeout=PING_TIMEOUT, privileged=True)
+            if h.rtts:
+                return (True, round(h.rtts[0], 3))
+        except Exception:
+            pass
+        return (False, None)
 
     async def _loop(self):
         self.running = True
         try:
+            await self._discover()
+            if not self.hop_list:
+                self.error = "Could not resolve any hops"
+            loop = asyncio.get_event_loop()
+            next_t = loop.time()
+            since_disc = 0
             while self.running:
                 if time.time() - self.last_poll > POLL_TIMEOUT:
                     break
-                try:
-                    batch = await self._run_batch()
+                addrs = [(h["idx"], h["addr"]) for h in self.hop_list]
+                if addrs:
+                    results = await asyncio.gather(*[self._ping_hop(a) for _, a in addrs])
                     t_ms = int(time.time() * 1000)
-                    for h in batch:
-                        idx = h["hop"]
+                    for (idx, addr), (up, rtt) in zip(addrs, results):
                         st = self.hops.get(idx)
                         if st is None:
-                            st = HopStat(h["host"])
+                            st = HopStat(addr or "???")
                             self.hops[idx] = st
-                        elif h["host"] not in (None, "???"):
-                            st.host = h["host"]
-                        st.update(h["snt"], h["recv"], h["last"], h["avg"],
-                                  h["best"], h["worst"], t_ms)
+                        st.update(up, rtt, t_ms)
                     self.cycles += 1
-                    self.error = None
-                except Exception as e:
-                    self.error = str(e)[:200]
-                    await asyncio.sleep(1)
+                since_disc += 1
+                if since_disc >= DISCOVER_EVERY:
+                    since_disc = 0
+                    try:
+                        await self._discover()
+                    except Exception:
+                        pass
+                next_t += INTERVAL
+                delay = next_t - loop.time()
+                if delay < 0:
+                    next_t = loop.time()
+                    delay = 0
+                await asyncio.sleep(delay)
         except asyncio.CancelledError:
             pass
         finally:
