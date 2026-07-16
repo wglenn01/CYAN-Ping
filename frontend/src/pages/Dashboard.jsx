@@ -73,13 +73,18 @@ function TargetCard({ target, onClick }) {
 
   useEffect(() => {
     let alive = true;
-    api.series(target.id, "3h").then((d) => {
-      if (!alive) return;
-      setSpark(d.points.slice(-40));
-      setAvg(d.stats.avg);
-    }).catch(() => {});
+    const fetchSeries = () => {
+      api.series(target.id, "3h").then((d) => {
+        if (!alive) return;
+        setSpark(d.points.slice(-40));
+        setAvg(d.stats.avg);
+      }).catch(() => {});
+    };
+    fetchSeries();
+    const iv = setInterval(fetchSeries, 30000);
     return () => {
       alive = false;
+      clearInterval(iv);
     };
   }, [target.id]);
 
